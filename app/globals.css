@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Space Grotesk", "Inter", system-ui;
+  --font-sans: "Inter", Arial, system-ui;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body {
+  background-color: #ffffff;
+  color: #212121;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  /* Near-black pill CTA — DESIGN.md button-primary */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-primary px-6 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-1 text-base text-ink underline underline-offset-4 hover:opacity-70;
+  }
+  .btn-outline {
+    @apply inline-flex items-center rounded-xl border border-primary px-3 py-1.5 text-sm text-primary transition-colors hover:bg-primary hover:text-white;
+  }
+  /* Uppercase technical label — DESIGN.md mono-label */
+  .mono-label {
+    @apply font-mono text-[14px] uppercase tracking-mono-label text-slate;
+  }
+  /* Coral taxonomy chip — DESIGN.md blog-filter-chip */
+  .archetype-chip {
+    @apply inline-flex items-center rounded-sm border border-coral-soft bg-[#fff5f2] px-2.5 py-1 text-xs font-medium text-coral;
+  }
+  .card {
+    @apply rounded-md border border-card-border bg-canvas;
+  }
+}
