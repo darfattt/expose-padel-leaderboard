@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rankPlayers } from "./leaderboard";
+import { levelForRating } from "./levels";
 import type { CareerStatRow } from "./types";
 
 function row(p: Partial<CareerStatRow> & { player_id: string; name: string }): CareerStatRow {
@@ -94,10 +95,19 @@ describe("rankPlayers", () => {
     expect(ranked[ranked.length - 1].row.player_id).toBe("newbie");
   });
 
-  it("keeps every rating within 0..100", () => {
+  it("keeps every rating within 0..10", () => {
     for (const p of ranked) {
       expect(p.rating).toBeGreaterThanOrEqual(0);
-      expect(p.rating).toBeLessThanOrEqual(100);
+      expect(p.rating).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it("maps ratings to Playtomic level bands", () => {
+    for (const p of ranked) {
+      const level = levelForRating(p.rating);
+      expect(level.category).toBeTruthy();
+      expect(level.badge).toBeTruthy();
+      expect(p.rating).toBeGreaterThanOrEqual(level.min);
     }
   });
 

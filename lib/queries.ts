@@ -9,6 +9,7 @@ export interface MatchHistoryEntry {
   matchId: string;
   eventId: string;
   eventTitle: string;
+  location: string | null;
   playedOn: string | null;
   round: number;
   court: number;
@@ -61,7 +62,7 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
     const { data: mine, error: e1 } = await supabase
       .from("match_players")
       .select(
-        "match_id, team, points, conceded, won, is_draw, matches!inner(id, round, court, event_id, events!inner(title, played_on))"
+        "match_id, team, points, conceded, won, is_draw, matches!inner(id, round, court, event_id, events!inner(title, played_on, location))"
       )
       .eq("player_id", id);
     if (e1) throw e1;
@@ -74,12 +75,16 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
       .in("match_id", matchIds);
     if (e2) throw e2;
 
-    const byMatch = new Map<string, { team: number; name: string }[]>();
+    const byMatch = new Map<string, { team: number; playerId: string; name: string }[]>();
     for (const p of participants ?? []) {
       const list = byMatch.get(p.match_id as string) ?? [];
       // Supabase types the joined relation as an array; it's a single row here.
       const player = Array.isArray(p.players) ? p.players[0] : p.players;
-      list.push({ team: p.team as number, name: (player as { name: string }).name });
+      list.push({
+        team: p.team as number,
+        playerId: p.player_id as string,
+        name: (player as { name: string }).name,
+      });
       byMatch.set(p.match_id as string, list);
     }
 
@@ -90,14 +95,16 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         round: number;
         court: number;
         event_id: string;
-        events: { title: string; played_on: string | null } | { title: string; played_on: string | null }[];
+        events:
+          | { title: string; played_on: string | null; location: string | null }
+          | { title: string; played_on: string | null; location: string | null }[];
       };
       const ev = Array.isArray(m.events) ? m.events[0] : m.events;
+      // Everyone in the match except the player whose history this is.
       const others = (byMatch.get(r.match_id as string) ?? []).filter(
-        (o) => o.name !== undefined
+        (o) => o.name !== undefined && o.playerId !== id
       );
       const myTeam = r.team as number;
-      // partner = same team, but not me (best-effort by team membership)
       const sameTeam = others.filter((o) => o.team === myTeam);
       const oppTeam = others.filter((o) => o.team !== myTeam);
       const partner = sameTeam.find((o) => o.name)?.name ?? null;
@@ -106,6 +113,7 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         matchId: m.id,
         eventId: m.event_id,
         eventTitle: ev?.title ?? "Event",
+        location: ev?.location ?? null,
         playedOn: ev?.played_on ?? null,
         round: m.round,
         court: m.court,

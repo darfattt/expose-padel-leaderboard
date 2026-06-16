@@ -1,11 +1,12 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRankedPlayer } from "@/lib/leaderboard";
+import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerMatchHistory } from "@/lib/queries";
-import { reportsEnabled } from "@/lib/report";
-import { getOrCreatePlayerReport } from "@/app/actions/report";
 import AttributeRadar from "./AttributeRadar";
-import ReportCard from "./ReportCard";
+import ReportCardAsync from "./ReportCardAsync";
+import ReportCardSkeleton from "./ReportCardSkeleton";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +27,12 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  const [matches, report] = await Promise.all([
-    getPlayerMatchHistory(id),
-    getOrCreatePlayerReport(id),
-  ]);
+  // Only the fast DB read blocks the page. The LLM scouting report streams in
+  // separately via the <Suspense> boundary below, so the page renders at once.
+  const matches = await getPlayerMatchHistory(id);
   const r = player.row;
   const a = player.attributes;
+  const level = levelForRating(player.rating);
 
   return (
     <div>
@@ -40,7 +41,18 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4 mt-4 mb-10">
         <div>
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <span
+              className="level-chip"
+              style={{
+                color: level.color,
+                borderColor: `${level.color}55`,
+                backgroundColor: `${level.color}12`,
+              }}
+            >
+              <span aria-hidden>{level.badge}</span>
+              {level.category}
+            </span>
             <span className="archetype-chip">{player.archetype.label}</span>
             {player.provisional ? (
               <span className="mono-label text-coral">Provisional</span>
@@ -50,12 +62,15 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           </div>
           <h1 className="font-display text-[56px] leading-none tracking-tight">{r.name}</h1>
           <p className="text-body-muted mt-2 max-w-md">{player.archetype.description}</p>
+          <p className="text-body-muted mt-1 max-w-md text-sm">
+            {level.badge} {level.category} · {level.description}
+          </p>
         </div>
         <div className="text-right">
           <div className="font-display text-[64px] leading-none tracking-tightest">
-            {player.rating}
+            {player.rating.toFixed(1)}
           </div>
-          <div className="mono-label mt-1">Rating / 100</div>
+          <div className="mono-label mt-1">Rating / 10</div>
         </div>
       </div>
 
@@ -64,13 +79,12 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         <div className="card p-6">
           <p className="mono-label mb-2">Attributes</p>
           <AttributeRadar attributes={a} />
-          <div className="grid grid-cols-5 gap-2 mt-2 text-center">
+          <div className="grid grid-cols-4 gap-2 mt-2 text-center">
             {[
-              ["ATK", a.attack],
-              ["DEF", a.defense],
-              ["CON", a.consistency],
-              ["CLT", a.clutch],
+              ["PWR", a.attack],
               ["WIN", a.win],
+              ["CLT", a.clutch],
+              ["CON", a.consistency],
             ].map(([label, v]) => (
               <div key={label as string}>
                 <div className="font-mono text-lg tabular-nums">{v}</div>
@@ -79,7 +93,9 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             ))}
           </div>
         </div>
-        <ReportCard playerId={id} initial={report} enabled={reportsEnabled()} />
+        <Suspense fallback={<ReportCardSkeleton />}>
+          <ReportCardAsync playerId={id} />
+        </Suspense>
       </div>
 
       {/* Stat lines */}
@@ -100,40 +116,59 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       {/* Match history */}
       <section>
         <p className="mono-label mb-3">Match history · {matches.length} games</p>
-        <div className="border-t border-hairline">
-          {matches.map((m) => (
-            <div
-              key={m.matchId}
-              className="grid grid-cols-[2.5rem_1fr_4rem_2rem] sm:grid-cols-[6rem_1fr_5rem_2.5rem] gap-3 items-center py-3 border-b border-hairline text-sm"
-            >
-              <Link
-                href={`/events/${m.eventId}`}
-                className="mono-label hover:text-ink truncate"
-                title={m.eventTitle}
-              >
-                R{m.round}
-              </Link>
-              <span className="text-body-muted truncate">
-                <span className="text-ink">{m.partner ?? "—"}</span>
-                <span className="text-muted"> vs </span>
-                {m.opponents.join(" & ") || "—"}
-              </span>
-              <span className="font-mono tabular-nums text-right">
-                {m.points}–{m.conceded}
-              </span>
-              <span
-                className={`text-right font-medium ${
-                  m.result === "W" ? "text-deep-green" : m.result === "L" ? "text-muted" : "text-slate"
-                }`}
-              >
-                {m.result}
-              </span>
+        {matches.length === 0 ? (
+          <p className="text-body-muted py-6 border-t border-hairline">No matches recorded.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <div className="min-w-[680px]">
+              {/* Header */}
+              <div className="grid grid-cols-[9rem_7rem_2.5rem_1fr_4.5rem_2.5rem] gap-3 items-center py-2 border-b border-hairline mono-label">
+                <span>Event</span>
+                <span>Location</span>
+                <span>Round</span>
+                <span>Players</span>
+                <span className="text-right">Score</span>
+                <span className="text-right">Result</span>
+              </div>
+              {matches.map((m) => (
+                <div
+                  key={m.matchId}
+                  className="grid grid-cols-[9rem_7rem_2.5rem_1fr_4.5rem_2.5rem] gap-3 items-center py-3 border-b border-hairline text-sm"
+                >
+                  <Link
+                    href={`/events/${m.eventId}`}
+                    className="truncate text-ink hover:opacity-70"
+                    title={m.eventTitle}
+                  >
+                    {m.eventTitle}
+                  </Link>
+                  <span className="truncate text-body-muted" title={m.location ?? ""}>
+                    {m.location ?? "—"}
+                  </span>
+                  <span className="mono-label">R{m.round}</span>
+                  <span className="text-body-muted truncate">
+                    <span className="text-ink">
+                      {r.name}
+                      {m.partner ? ` & ${m.partner}` : ""}
+                    </span>
+                    <span className="text-muted"> vs </span>
+                    {m.opponents.join(" & ") || "—"}
+                  </span>
+                  <span className="font-mono tabular-nums text-right">
+                    {m.points}–{m.conceded}
+                  </span>
+                  <span
+                    className={`text-right font-medium ${
+                      m.result === "W" ? "text-deep-green" : m.result === "L" ? "text-muted" : "text-slate"
+                    }`}
+                  >
+                    {m.result}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-          {matches.length === 0 && (
-            <p className="text-body-muted py-6">No matches recorded.</p>
-          )}
-        </div>
+          </div>
+        )}
       </section>
     </div>
   );

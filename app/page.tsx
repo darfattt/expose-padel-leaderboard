@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getLeaderboard } from "@/lib/leaderboard";
+import { levelForRating } from "@/lib/levels";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,8 @@ export default async function LeaderboardPage() {
           Every match, every player, one board.
         </h1>
         <p className="text-body-muted text-lg mt-5 max-w-xl">
-          Ratings blend win rate, point differential, and scoring across all uploaded events.
-          Upload a Reclub scoresheet to update it.
+          Ratings blend win rate, point differential, and scoring across all uploaded events,
+          on a 0–10 scale mapped to Playtomic-style levels. Upload a Reclub scoresheet to update it.
         </p>
         {/* <div className="mt-7">
           <Link href="/upload" className="btn-primary">
@@ -51,45 +52,69 @@ function Board({
   rows: Awaited<ReturnType<typeof getLeaderboard>>;
   provisional?: boolean;
 }) {
+  const cols =
+    "grid-cols-[3rem_1fr_4rem_10rem_8rem_4.5rem_3.5rem_4rem_4.5rem]";
   return (
     <div className="border-t border-hairline">
       {/* header row */}
-      <div className="hidden sm:grid grid-cols-[3rem_1fr_5rem_9rem_5rem_4rem_4rem_5rem] gap-4 py-3 mono-label border-b border-hairline">
+      <div className={`hidden sm:grid ${cols} gap-4 py-3 mono-label border-b border-hairline`}>
         <span>#</span>
         <span>Player</span>
         <span className="text-right">Rating</span>
+        <span>Level</span>
         <span>Archetype</span>
         <span className="text-right">W–L</span>
         <span className="text-right">GP</span>
         <span className="text-right">Win %</span>
         <span className="text-right">Pts</span>
       </div>
-      {rows.map((p) => (
-        <Link
-          key={p.row.player_id}
-          href={`/players/${p.row.player_id}`}
-          className="grid grid-cols-[3rem_1fr_5rem_9rem_5rem_4rem_4rem_5rem] gap-4 items-center py-4 border-b border-hairline hover:bg-soft-stone/40 transition-colors"
-        >
-          <span className="font-display text-xl tabular-nums text-slate">
-            {provisional ? "—" : p.rank}
-          </span>
-          <span className="font-display text-lg tracking-tight">{p.row.name}</span>
-          <span className="text-right font-mono text-lg tabular-nums">{p.rating}</span>
-          <span>
-            <span className="archetype-chip">{p.archetype.label}</span>
-          </span>
-          <span className="text-right tabular-nums text-body-muted">
-            {p.row.wins}–{p.row.losses}
-            {p.row.draws ? `–${p.row.draws}` : ""}
-          </span>
-          <span className="text-right tabular-nums text-body-muted">{p.row.games}</span>
-          <span className="text-right tabular-nums text-body-muted">
-            {Math.round(p.metrics.winRate * 100)}%
-          </span>
-          <span className="text-right tabular-nums text-body-muted">{p.row.points_for}</span>
-        </Link>
-      ))}
+      {rows.map((p) => {
+        const level = levelForRating(p.rating);
+        return (
+          <Link
+            key={p.row.player_id}
+            href={`/players/${p.row.player_id}`}
+            className={`grid ${cols} gap-4 items-center py-4 border-b border-hairline hover:bg-soft-stone/40 transition-colors`}
+          >
+            <span className="font-display text-xl tabular-nums text-slate">
+              {provisional ? "—" : p.rank}
+            </span>
+            <span className="font-display text-lg tracking-tight">{p.row.name}</span>
+            <span className="text-right font-mono text-lg tabular-nums">
+              {p.rating.toFixed(1)}
+            </span>
+            <span>
+              <LevelBadge level={level} />
+            </span>
+            <span>
+              <span className="archetype-chip">{p.archetype.label}</span>
+            </span>
+            <span className="text-right tabular-nums text-body-muted">
+              {p.row.wins}–{p.row.losses}
+              {p.row.draws ? `–${p.row.draws}` : ""}
+            </span>
+            <span className="text-right tabular-nums text-body-muted">{p.row.games}</span>
+            <span className="text-right tabular-nums text-body-muted">
+              {Math.round(p.metrics.winRate * 100)}%
+            </span>
+            <span className="text-right tabular-nums text-body-muted">{p.row.points_for}</span>
+          </Link>
+        );
+      })}
     </div>
+  );
+}
+
+function LevelBadge({ level }: { level: ReturnType<typeof levelForRating> }) {
+  return (
+    <span
+      className="level-chip"
+      style={{ color: level.color, borderColor: `${level.color}55`, backgroundColor: `${level.color}12` }}
+      title={`${level.category} — ${level.description}`}
+    >
+      <span aria-hidden>{level.badge}</span>
+      {level.category}
+    </span>
   );
 }
 

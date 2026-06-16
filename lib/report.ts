@@ -4,10 +4,11 @@ import { groq } from "@ai-sdk/groq";
 import { z } from "zod";
 import type { AttributeKey } from "./archetype";
 import type { RankedPlayer } from "./leaderboard";
+import { levelForRating } from "./levels";
 import type { MatchHistoryEntry } from "./queries";
 
 // Bump when the prompt/schema changes so cached reports regenerate.
-const PROMPT_VERSION = "v2-pros";
+const PROMPT_VERSION = "v4-levels";
 
 export const proComparisonSchema = z.object({
   name: z.string().describe("Full name of a real professional padel player."),
@@ -90,13 +91,15 @@ export function buildReportFacts(input: ReportInput): string {
     )
     .join("\n");
 
-  const candidates = proCandidatesFor(player.archetype.key);
+  const candidates = proCandidatesFor(player.archetype.primary);
+  const level = levelForRating(player.rating);
 
   return [
     `Player: ${r.name}`,
-    `Performance rating: ${player.rating}/100${player.provisional ? " (provisional — fewer than 3 games)" : ""}`,
+    `Performance rating: ${player.rating.toFixed(1)}/10${player.provisional ? " (provisional — fewer than 3 games)" : ""}`,
+    `Level: ${level.category} (Playtomic-style) — ${level.description}`,
     `Archetype: ${player.archetype.label} — ${player.archetype.description}`,
-    `Attributes (0-100): Attack ${a.attack}, Defense ${a.defense}, Consistency ${a.consistency}, Clutch ${a.clutch}, Win ${a.win}`,
+    `Attributes (0-100): Power ${a.attack}, Consistency ${a.consistency}, Clutch ${a.clutch}, Win ${a.win}`,
     `Record: ${r.wins}W-${r.losses}L-${r.draws}D over ${r.games} games`,
     `Points for/against: ${r.points_for} / ${r.points_against} (differential ${r.point_diff >= 0 ? "+" : ""}${r.point_diff})`,
     `Close games (margin <= 3): ${r.close_wins} won of ${r.close_games}`,

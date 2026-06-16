@@ -2,6 +2,10 @@ import UploadForm from "./UploadForm";
 
 export const metadata = { title: "Upload scoresheet · expose.padelleaderboard" };
 
+// Pulls in the server action's pdfjs-dist bundle; skip static prerender (which
+// crashes under webpack) — there's nothing static to generate here anyway.
+export const dynamic = "force-dynamic";
+
 export default function UploadPage() {
   return (
     <div className="max-w-3xl">

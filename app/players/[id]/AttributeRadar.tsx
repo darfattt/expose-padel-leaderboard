@@ -11,12 +11,14 @@ import {
 import type { Attributes } from "@/lib/archetype";
 
 export default function AttributeRadar({ attributes }: { attributes: Attributes }) {
+  // Attack and Defense are the same signal in fixed-sum games (points always
+  // total 21, so ppg + concededPg is constant) — collapse them into one "Power"
+  // axis. The four axes here mirror the archetype-selection axes exactly.
   const data = [
-    { attr: "Attack", value: attributes.attack },
-    { attr: "Defense", value: attributes.defense },
-    { attr: "Consistency", value: attributes.consistency },
-    { attr: "Clutch", value: attributes.clutch },
+    { attr: "Power", value: attributes.attack },
     { attr: "Win", value: attributes.win },
+    { attr: "Clutch", value: attributes.clutch },
+    { attr: "Consistency", value: attributes.consistency },
   ];
   return (
     <ResponsiveContainer width="100%" height={300}>

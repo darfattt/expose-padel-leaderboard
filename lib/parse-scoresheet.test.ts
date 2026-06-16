@@ -6,7 +6,10 @@ import { parseScoresheet } from "./parse-scoresheet";
 async function findPdf(): Promise<string> {
   const root = path.resolve(__dirname, "..");
   const files = await readdir(root);
-  const pdf = files.find((f) => f.toLowerCase().endsWith(".pdf"));
+  // Pin to the Mexicano sample — other scoresheets may also live in the root.
+  const pdf =
+    files.find((f) => /mexicano/i.test(f) && f.toLowerCase().endsWith(".pdf")) ??
+    files.find((f) => f.toLowerCase().endsWith(".pdf"));
   if (!pdf) throw new Error("No sample PDF found in project root");
   return path.join(root, pdf);
 }

@@ -72,6 +72,7 @@ export function rankPlayers(rows: CareerStatRow[]): RankedPlayer[] {
   enriched.sort((a, b) => {
     if (a.provisional !== b.provisional) return a.provisional ? 1 : -1;
     if (b.rating !== a.rating) return b.rating - a.rating;
+    if (b.metrics.winRate !== a.metrics.winRate) return b.metrics.winRate - a.metrics.winRate;
     return b.row.point_diff - a.row.point_diff;
   });
 
