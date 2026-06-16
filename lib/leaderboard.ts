@@ -87,6 +87,14 @@ export async function getLeaderboard(): Promise<RankedPlayer[]> {
   return rankPlayers(await fetchCareerStats());
 }
 
+// The field normalization used by computeRating, built from the whole field.
+// Exposed so a player's per-event rating history can be measured against the
+// same field that produces the headline rating (see lib/rating-history.ts).
+export async function getRatingField(): Promise<RatingField> {
+  const metrics = (await fetchCareerStats()).filter((r) => r.games > 0).map(computeMetrics);
+  return buildRatingField(metrics);
+}
+
 // Enriched entry for a single player, computed against the full field so the
 // rating/archetype match the leaderboard exactly.
 export async function getRankedPlayer(playerId: string): Promise<RankedPlayer | null> {

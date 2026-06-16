@@ -16,7 +16,7 @@ const sans = Inter({
 
 export const metadata: Metadata = {
   title: "expose.padelleaderboard",
-  description: "Upload a Reclub scoresheet, get a live padel leaderboard, player profiles, and AI scouting reports.",
+  description: "Upload a Reclub scoresheet, get a live padel leaderboard, player profiles, and AI Player Reports.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -35,6 +35,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </Link>
           <nav className="hidden sm:flex items-center gap-8 text-sm text-body-muted">
             <Link href="/" className="hover:text-ink">Leaderboard</Link>
+            <Link href="/events" className="hover:text-ink">Events</Link>
+            <Link href="/scatter" className="hover:text-ink">Scatter analysis</Link>
             <Link href="/upload" className="hover:text-ink">Upload</Link>
           </nav>
           <Link href="/upload" className="btn-primary">Upload scoresheet</Link>

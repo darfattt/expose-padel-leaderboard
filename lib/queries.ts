@@ -136,6 +136,23 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
   }
 }
 
+// All events, newest first. Returns [] when Supabase isn't configured or the
+// table is empty, so the events page can render an empty state.
+export async function getEvents(): Promise<EventRow[]> {
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("events")
+      .select("*")
+      .order("played_on", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as EventRow[];
+  } catch {
+    return [];
+  }
+}
+
 export async function getEvent(id: string): Promise<EventRow | null> {
   try {
     const supabase = createReadClient();

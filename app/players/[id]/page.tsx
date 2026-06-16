@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRankedPlayer } from "@/lib/leaderboard";
+import { getRankedPlayer, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerMatchHistory } from "@/lib/queries";
+import { buildRatingHistory } from "@/lib/rating-history";
 import AttributeRadar from "./AttributeRadar";
+import RatingHistoryChart from "./RatingHistoryChart";
 import ReportCardAsync from "./ReportCardAsync";
 import ReportCardSkeleton from "./ReportCardSkeleton";
 
@@ -27,12 +29,16 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  // Only the fast DB read blocks the page. The LLM scouting report streams in
+  // Only the fast DB read blocks the page. The LLM Player Report streams in
   // separately via the <Suspense> boundary below, so the page renders at once.
-  const matches = await getPlayerMatchHistory(id);
+  const [matches, ratingField] = await Promise.all([
+    getPlayerMatchHistory(id),
+    getRatingField(),
+  ]);
   const r = player.row;
   const a = player.attributes;
   const level = levelForRating(player.rating);
+  const ratingHistory = buildRatingHistory(matches, ratingField, { id: r.player_id, name: r.name });
 
   return (
     <div>
@@ -112,6 +118,17 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         <StatLine label="Win rate" value={`${Math.round(player.metrics.winRate * 100)}%`} />
         <StatLine label="Pts / game" value={player.metrics.ppg.toFixed(1)} />
       </div>
+
+      {/* Rating history */}
+      {ratingHistory.length >= 2 ? (
+        <div className="card p-6 mb-12">
+          <p className="mono-label mb-1">Rating history</p>
+          <p className="text-body-muted text-sm mb-4">
+            Rating after each event · {ratingHistory.length} events
+          </p>
+          <RatingHistoryChart history={ratingHistory} />
+        </div>
+      ) : null}
 
       {/* Match history */}
       <section>

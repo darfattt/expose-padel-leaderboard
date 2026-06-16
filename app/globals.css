@@ -44,7 +44,7 @@ body {
 }
 
 /* Padel-ball loader — a ball that bounces while its seam spins, with a
-   squashing shadow underneath. Used while the scouting report streams in. */
+   squashing shadow underneath. Used while the Player Report streams in. */
 @keyframes padel-bounce {
   0%,
   100% {
