@@ -119,7 +119,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       </div>
 
       {/* Reliability gate: shown only while it actively caps the rating */}
-      <ReliabilityGate games={r.games} wins={r.wins} rating={player.rating} />
+      <ReliabilityGate score={r.point_diff} wins={r.wins} rating={player.rating} />
 
       {/* Recent form + gossip hooks (deterministic one-liner + LLM column) */}
       {form.recent.length > 0 || venueGossip ? (
@@ -270,14 +270,14 @@ function BackLink() {
 // "X more wins to unlock <Band>" — only rendered while the reliability gate is
 // the binding constraint (the rating sits exactly at the band ceiling). A
 // performance-limited player sees nothing, since unlocking wouldn't lift them.
-function ReliabilityGate({ games, wins, rating }: { games: number; wins: number; rating: number }) {
-  const cap = reliabilityCap({ games, wins });
-  const gate = nextReliabilityGate({ games, wins });
+function ReliabilityGate({ score, wins, rating }: { score: number; wins: number; rating: number }) {
+  const cap = reliabilityCap({ score, wins });
+  const gate = nextReliabilityGate({ score, wins });
   if (!gate || rating < cap - 1e-9) return null;
 
   const band = levelForRating(gate.tier.level);
   const needs = [
-    gate.gamesNeeded > 0 ? `${gate.gamesNeeded} more ${gate.gamesNeeded === 1 ? "game" : "games"}` : null,
+    gate.scoreNeeded > 0 ? `${gate.scoreNeeded} more net ${gate.scoreNeeded === 1 ? "point" : "points"}` : null,
     gate.winsNeeded > 0 ? `${gate.winsNeeded} more ${gate.winsNeeded === 1 ? "win" : "wins"}` : null,
   ]
     .filter(Boolean)

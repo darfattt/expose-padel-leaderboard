@@ -17,27 +17,33 @@ export const MAX_RATING = 7;
 // as you play more competitive matches) and only trusts a high level once that
 // confidence is there, rather than after a fixed match count (researched at
 // playerhelp.playtomic.com — "How the Playtomic level system works"). We make
-// that concrete with one gate per upper band: to be rated into the level-N band
-// a player must clear that band's games-and-wins bar. Until they do, the rating
-// is held just below the band — they've earned the bands below, not this one.
-// Bars rise together and keep the win rate around 60–67%, so only a genuinely
-// dominant, well-tested player reaches the top.
+// that concrete with one gate per band: to be rated into the level-N band a
+// player must clear that band's bar on two earned totals — net points (`minScore`
+// = cumulative points-for minus points-against) and wins. Net points (rather than
+// raw points-for or games-played) is the point: it rewards out-scoring opponents,
+// so conceding as much as you score earns nothing. Until both are met the rating
+// is held just below the band — they've earned the bands beneath, not this one.
+// Gating starts at 1.5; the bars climb steeply, so the top levels take a season
+// of sustained, winning, dominant play.
 export interface ReliabilityTier {
-  level: number; // integer band a player must qualify for to be rated into it
-  minGames: number;
+  level: number; // band a player must qualify for to be rated into it
+  minScore: number; // cumulative net points (points-for minus points-against)
   minWins: number;
 }
 
 export const RELIABILITY_TIERS: ReliabilityTier[] = [
-  { level: 4, minGames: 8, minWins: 5 }, // ~1 event, winning record → Controller (4.x)
-  { level: 5, minGames: 14, minWins: 9 }, // ~2 events → Competitor (5.x)
-  { level: 6, minGames: 20, minWins: 13 }, // ~3 events → Elite (6.x)
-  { level: 7, minGames: 30, minWins: 20 }, // sustained dominance → Professional (7.0)
+  { level: 1.5, minScore: 60, minWins: 4 }, // → Rallyer (1.5–2.0)
+  { level: 2, minScore: 130, minWins: 8 }, // → Improver (2.x)
+  { level: 3, minScore: 240, minWins: 15 }, // → Driver (3.x)
+  { level: 4, minScore: 400, minWins: 25 }, // → Controller (4.x)
+  { level: 5, minScore: 620, minWins: 40 }, // → Competitor (5.x)
+  { level: 6, minScore: 900, minWins: 60 }, // → Elite (6.x)
+  { level: 7, minScore: 1240, minWins: 85 }, // a season of dominance → Professional (7.0)
 ];
 
-// The career counts the reliability gate needs (a player's own totals).
+// The career totals the reliability gate needs (a player's own net points + wins).
 export interface Reliability {
-  games: number;
+  score: number; // cumulative net points (points-for minus points-against)
   wins: number;
 }
 
@@ -67,9 +73,9 @@ export function computeRating(
 // The highest rating a record currently justifies: walk the gates low → high and
 // stop just below the first band the player can't yet clear. A fully proven
 // record unlocks the whole ladder (MAX_RATING).
-export function reliabilityCap({ games, wins }: Reliability): number {
+export function reliabilityCap({ score, wins }: Reliability): number {
   for (const t of RELIABILITY_TIERS) {
-    if (games < t.minGames || wins < t.minWins) {
+    if (score < t.minScore || wins < t.minWins) {
       return Math.round((t.level - 0.1) * 10) / 10; // top of the last earned band
     }
   }
@@ -83,21 +89,21 @@ export function capForReliability(rating: number, reliability: Reliability): num
 }
 
 // How much more it takes to clear the next reliability gate. The next gate is the
-// first tier the player hasn't fully met; `gamesNeeded`/`winsNeeded` are what's
+// first tier the player hasn't fully met; `scoreNeeded`/`winsNeeded` are what's
 // still missing (0 once that half of the bar is already cleared). null when every
 // gate is cleared — the player can reach the top of the ladder.
 export interface NextGate {
   tier: ReliabilityTier;
-  gamesNeeded: number;
+  scoreNeeded: number;
   winsNeeded: number;
 }
 
-export function nextReliabilityGate({ games, wins }: Reliability): NextGate | null {
+export function nextReliabilityGate({ score, wins }: Reliability): NextGate | null {
   for (const t of RELIABILITY_TIERS) {
-    if (games < t.minGames || wins < t.minWins) {
+    if (score < t.minScore || wins < t.minWins) {
       return {
         tier: t,
-        gamesNeeded: Math.max(0, t.minGames - games),
+        scoreNeeded: Math.max(0, t.minScore - score),
         winsNeeded: Math.max(0, t.minWins - wins),
       };
     }

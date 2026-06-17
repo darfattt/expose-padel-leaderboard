@@ -92,18 +92,20 @@ export default function HowItWorksPage() {
         <p>
           Playtomic doesn’t trust a high level on a thin record — it tracks{" "}
           <b>reliability</b> (confidence that builds as you play). We make that
-          concrete: to be rated <em>into</em> an upper band you have to clear that
-          band’s games-<i>and</i>-wins bar. Until you do, your rating is held just
-          below the band — you’ve earned the bands beneath, not this one.
+          concrete: to be rated <em>into</em> a band you have to clear that band’s
+          bar on two earned totals — <b>net points</b> (everything you’ve scored
+          minus everything you’ve conceded) and <b>wins</b>. Net points is the
+          point: it weighs your scoring <em>against</em> what you give up, so
+          conceding as much as you score earns nothing. Until you clear both, your
+          rating is held just below the band.
         </p>
         <div className="overflow-x-auto mt-4">
           <table className="w-full text-sm min-w-[420px]">
             <thead>
               <tr className="mono-label text-left border-b border-hairline">
                 <th className="py-2 font-normal">Band</th>
-                <th className="py-2 font-normal text-right">Min games</th>
+                <th className="py-2 font-normal text-right">Min net points</th>
                 <th className="py-2 font-normal text-right">Min wins</th>
-                <th className="py-2 font-normal text-right">≈ win rate</th>
               </tr>
             </thead>
             <tbody>
@@ -120,11 +122,8 @@ export default function HowItWorksPage() {
                         {band.category} {t.level.toFixed(1)}+
                       </span>
                     </td>
-                    <td className="py-2.5 text-right font-mono tabular-nums">{t.minGames}</td>
+                    <td className="py-2.5 text-right font-mono tabular-nums">+{t.minScore}</td>
                     <td className="py-2.5 text-right font-mono tabular-nums">{t.minWins}</td>
-                    <td className="py-2.5 text-right font-mono tabular-nums text-body-muted">
-                      {Math.round((t.minWins / t.minGames) * 100)}%
-                    </td>
                   </tr>
                 );
               })}
@@ -132,9 +131,15 @@ export default function HowItWorksPage() {
           </table>
         </div>
         <p className="mt-4 text-body-muted text-sm">
-          Your profile shows the exact gap to your next gate (e.g. “3 more wins to
-          unlock Competitor”) whenever reliability is what’s holding your rating
-          down. A hot two-game streak can’t fake an Elite rating.
+          Gating starts at level 1.5 and the bars climb steeply — a strong event or
+          two reaches the lower bands, but Elite and Professional need a season’s
+          worth of net points and wins.
+        </p>
+        <p className="mt-3 text-body-muted text-sm">
+          Your profile shows the exact gap to your next gate (e.g. “60 more net
+          points and 4 more wins to unlock Competitor”) whenever reliability is
+          what’s holding your rating down. A hot two-game streak can’t fake an
+          Elite rating.
         </p>
       </Section>
 

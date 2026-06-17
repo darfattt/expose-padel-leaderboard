@@ -112,11 +112,11 @@ describe("rankPlayers", () => {
     }
   });
 
-  it("holds a thin record below the level-4 reliability gate", () => {
-    // A perfect but tiny sample (2 games, 2 wins) hasn't cleared even the
-    // level-4 bar, so it can't be rated into the 4.x band.
+  it("holds a thin record below the lowest (level-1.5) reliability gate", () => {
+    // A perfect but tiny sample (2 games, +30 net) hasn't cleared even the lowest
+    // (level-1.5) bar, so it can't be rated into the 1.5 band.
     const newbie = ranked.find((p) => p.row.player_id === "newbie")!;
-    expect(newbie.rating).toBeLessThan(4);
+    expect(newbie.rating).toBeLessThan(1.5);
   });
 
   it("gives the dominant player the top rating and a non-balanced archetype", () => {
@@ -131,22 +131,25 @@ describe("rankPlayers", () => {
 });
 
 describe("capForReliability", () => {
-  it("caps a record below the level-4 gate under 4.0", () => {
-    expect(capForReliability(6.5, { games: 3, wins: 3 })).toBeLessThan(4);
-    expect(capForReliability(6.5, { games: 20, wins: 4 })).toBeLessThan(4); // games ok, too few wins
+  it("caps a record below the lowest (level-1.5) gate under 1.5", () => {
+    expect(capForReliability(6.5, { score: 40, wins: 5 })).toBeLessThan(1.5); // too few net points
+    expect(capForReliability(6.5, { score: 200, wins: 3 })).toBeLessThan(1.5); // net ok, too few wins
   });
 
-  it("unlocks one band at a time as games and wins grow", () => {
-    expect(capForReliability(7, { games: 10, wins: 6 })).toBeLessThan(5); // cleared L4, not L5
-    expect(capForReliability(7, { games: 16, wins: 10 })).toBeLessThan(6); // cleared L5, not L6
-    expect(capForReliability(7, { games: 22, wins: 14 })).toBeLessThan(7); // cleared L6, not L7
+  it("unlocks one band at a time as net points and wins grow", () => {
+    expect(capForReliability(7, { score: 80, wins: 5 })).toBeLessThan(2); // cleared L1.5, not L2
+    expect(capForReliability(7, { score: 160, wins: 10 })).toBeLessThan(3); // cleared L2, not L3
+    expect(capForReliability(7, { score: 300, wins: 18 })).toBeLessThan(4); // cleared L3, not L4
+    expect(capForReliability(7, { score: 480, wins: 30 })).toBeLessThan(5); // cleared L4, not L5
+    expect(capForReliability(7, { score: 700, wins: 45 })).toBeLessThan(6); // cleared L5, not L6
+    expect(capForReliability(7, { score: 1000, wins: 65 })).toBeLessThan(7); // cleared L6, not L7
   });
 
   it("lets a fully proven record reach the top of the ladder", () => {
-    expect(capForReliability(7, { games: 30, wins: 20 })).toBe(7);
+    expect(capForReliability(7, { score: 1240, wins: 85 })).toBe(7);
   });
 
   it("never lowers a rating already under the unlocked ceiling", () => {
-    expect(capForReliability(3.2, { games: 3, wins: 1 })).toBe(3.2);
+    expect(capForReliability(1.2, { score: 30, wins: 1 })).toBe(1.2);
   });
 });

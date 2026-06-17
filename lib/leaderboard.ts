@@ -76,7 +76,7 @@ export function rankPlayers(rows: CareerStatRow[]): RankedPlayer[] {
     return {
       row,
       metrics: m,
-      rating: computeRating(m, ratingField, { games: row.games, wins: row.wins }),
+      rating: computeRating(m, ratingField, { score: row.point_diff, wins: row.wins }),
       attributes: computeAttributes(m, archetypeField),
       archetype: pickArchetype(m, archetypeField),
       provisional: isProvisional(row.games),
