@@ -16,6 +16,7 @@ import GossipCardAsync from "./GossipCardAsync";
 import GossipCardSkeleton from "./GossipCardSkeleton";
 import { GossipLine } from "./relationship-ui";
 import PartnerChemistryCard from "./PartnerChemistryCard";
+import RacketRecoAsync, { RacketRecoSkeleton } from "./RacketReco";
 import RatingHistoryChart from "./RatingHistoryChart";
 import ReportCardAsync from "./ReportCardAsync";
 import ReportCardSkeleton from "./ReportCardSkeleton";
@@ -147,6 +148,9 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
               </div>
             ))}
           </div>
+          <Suspense fallback={<RacketRecoSkeleton />}>
+            <RacketRecoAsync rating={player.rating} attributes={a} />
+          </Suspense>
         </div>
         <Suspense fallback={<ReportCardSkeleton />}>
           <ReportCardAsync playerId={id} />

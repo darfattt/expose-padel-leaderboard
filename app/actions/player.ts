@@ -1,6 +1,8 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, unstable_cache } from "next/cache";
+import type { Attributes } from "@/lib/archetype";
+import { racketCriteria, type RacketCriteria, type RacketRecommendation } from "@/lib/racket-reco";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { PlayerPosition, RacketOption } from "@/lib/types";
 
@@ -50,6 +52,99 @@ export async function searchRackets(query: string): Promise<RacketOption[]> {
     if (!res.ok) throw new Error(`Padelful API ${res.status}`);
     const json = (await res.json()) as { data?: { rackets?: PadelfulRacket[] } };
     return (json.data?.rackets ?? []).map(toRacketOption);
+  } catch {
+    return [];
+  }
+}
+
+// Shape of a pick from POST /api/v1/recommendations (only fields we use).
+interface PadelfulRecommendation {
+  slug: string;
+  model?: string;
+  title?: string;
+  brand?: string;
+  shape?: string | null;
+  feel?: string | null;
+  rating?: string | number | null;
+  pvp?: number | null;
+  url?: string | null;
+  matchReason?: string;
+}
+
+function toAbsoluteUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  return `${PADELFUL_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function toRecommendation(r: PadelfulRecommendation): RacketRecommendation {
+  return {
+    slug: r.slug,
+    model: r.model ?? r.title ?? r.slug,
+    brand: r.brand ?? "",
+    shape: r.shape ?? null,
+    feel: r.feel ?? null,
+    rating: r.rating != null ? String(r.rating) : null,
+    price: typeof r.pvp === "number" ? r.pvp : null,
+    image: null, // filled in by enrichWithImage — the reco endpoint omits it
+    url: toAbsoluteUrl(r.url),
+    matchReason: r.matchReason ?? "",
+  };
+}
+
+// The recommendations endpoint omits the product shot, so look it up per slug
+// from GET /api/v1/rackets/{slug}. Cached (stable catalogue); returns null on
+// any miss so a recommendation simply renders without an image.
+const fetchRacketImage = unstable_cache(
+  async (slug: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`${PADELFUL_BASE}/api/v1/rackets/${encodeURIComponent(slug)}`, {
+        headers: { accept: "application/json" },
+        next: { revalidate: 86_400 },
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as { data?: { racket?: { image?: string | null } } };
+      return toAbsoluteImage(json.data?.racket?.image);
+    } catch {
+      return null;
+    }
+  },
+  ["racket-image"],
+  { revalidate: 86_400 }
+);
+
+// POST is not cached by Next's fetch Data Cache, so cache the result ourselves
+// keyed by the (level, playStyle) criteria — only nine combinations exist, and
+// the catalogue is stable. Throws on failure so a transient error is never
+// cached; getRacketRecommendations swallows it into [].
+const fetchRecommendations = unstable_cache(
+  async (criteria: RacketCriteria): Promise<RacketRecommendation[]> => {
+    const res = await fetch(`${PADELFUL_BASE}/api/v1/recommendations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ ...criteria, locale: "en" }),
+    });
+    if (!res.ok) throw new Error(`Padelful API ${res.status}`);
+    const json = (await res.json()) as {
+      data?: { recommendations?: PadelfulRecommendation[] };
+    };
+    const recs = (json.data?.recommendations ?? []).map(toRecommendation);
+    return Promise.all(
+      recs.map(async (r) => ({ ...r, image: await fetchRacketImage(r.slug) }))
+    );
+  },
+  ["racket-recommendations"],
+  { revalidate: 86_400 }
+);
+
+// Racket recommendations for a player's current rating + attributes. Returns []
+// on any failure so the card degrades gracefully (mirrors searchRackets).
+export async function getRacketRecommendations(
+  rating: number,
+  attributes: Attributes
+): Promise<RacketRecommendation[]> {
+  try {
+    return await fetchRecommendations(racketCriteria(rating, attributes));
   } catch {
     return [];
   }
