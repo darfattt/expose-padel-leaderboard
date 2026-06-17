@@ -1,21 +1,30 @@
 import Link from "next/link";
-import { getLeaderboard } from "@/lib/leaderboard";
+import { getLeaderboardView } from "@/lib/leaderboard";
 import { getClubs } from "@/lib/clubs";
 import { levelForRating } from "@/lib/levels";
+import { formatMonth, type RankedPlayerWithChange } from "@/lib/standings";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeaderboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ club?: string }>;
+  searchParams: Promise<{ club?: string; period?: string }>;
 }) {
-  const { club: clubParam } = await searchParams;
+  const { club: clubParam, period: periodParam } = await searchParams;
   const clubs = await getClubs();
   const activeClub = clubs.find((c) => c.id === clubParam) ?? null;
-  const board = await getLeaderboard(activeClub?.id);
+  const { board, months, period } = await getLeaderboardView(activeClub?.id, periodParam);
   const ranked = board.filter((p) => !p.provisional);
   const provisional = board.filter((p) => p.provisional);
+
+  // Carry the active club through period links (and vice-versa).
+  const withClub = (params: Record<string, string>) => {
+    const sp = new URLSearchParams(params);
+    if (activeClub) sp.set("club", activeClub.id);
+    const qs = sp.toString();
+    return qs ? `/?${qs}` : "/";
+  };
 
   return (
     <div>
@@ -32,7 +41,7 @@ export default async function LeaderboardPage({
       </section>
 
       {clubs.length > 0 && (
-        <nav className="mb-10 flex flex-wrap gap-2 border-b border-hairline pb-4">
+        <nav className="mb-6 flex flex-wrap gap-2 border-b border-hairline pb-4">
           <ClubTab href="/" label="All clubs" active={!activeClub} />
           {clubs.map((c) => (
             <ClubTab
@@ -45,8 +54,18 @@ export default async function LeaderboardPage({
         </nav>
       )}
 
+      {months.length > 0 && (
+        <nav className="mb-10 flex flex-wrap items-center gap-2">
+          <span className="mono-label mr-1">Period</span>
+          <ClubTab href={withClub({})} label="All time" active={period === "all"} />
+          {months.map((m) => (
+            <ClubTab key={m} href={withClub({ period: m })} label={formatMonth(m)} active={period === m} />
+          ))}
+        </nav>
+      )}
+
       {board.length === 0 ? (
-        <EmptyState />
+        <EmptyState monthly={period !== "all"} />
       ) : (
         <>
           <Board rows={ranked} />
@@ -66,16 +85,17 @@ function Board({
   rows,
   provisional = false,
 }: {
-  rows: Awaited<ReturnType<typeof getLeaderboard>>;
+  rows: RankedPlayerWithChange[];
   provisional?: boolean;
 }) {
   const cols =
-    "grid-cols-[3rem_1fr_4rem_10rem_8rem_4.5rem_3.5rem_4rem_4.5rem]";
+    "grid-cols-[3rem_2.5rem_1fr_4rem_10rem_8rem_4.5rem_3.5rem_4rem_4.5rem]";
   return (
     <div className="border-t border-hairline">
       {/* header row */}
       <div className={`hidden sm:grid ${cols} gap-4 py-3 mono-label border-b border-hairline`}>
         <span>#</span>
+        <span></span>
         <span>Player</span>
         <span className="text-right">Rating</span>
         <span>Level</span>
@@ -95,6 +115,9 @@ function Board({
           >
             <span className="font-display text-xl tabular-nums text-slate">
               {provisional ? "—" : p.rank}
+            </span>
+            <span>
+              <RankChange delta={p.rankDelta} isNew={p.isNew} />
             </span>
             <span className="font-display text-lg tracking-tight">{p.row.name}</span>
             <span className="text-right font-mono text-lg tabular-nums">
@@ -119,6 +142,42 @@ function Board({
         );
       })}
     </div>
+  );
+}
+
+// Up/down movement since the standings before the most recent event.
+function RankChange({ delta, isNew }: { delta: number | null; isNew: boolean }) {
+  if (isNew) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-mono tracking-mono-label"
+        style={{ color: "#1863dc", backgroundColor: "#1863dc12" }}
+        title="New to the ranked board"
+      >
+        NEW
+      </span>
+    );
+  }
+  if (delta === null) return null;
+  if (delta === 0) {
+    return (
+      <span className="font-mono text-xs text-muted" title="No change" aria-label="No change">
+        –
+      </span>
+    );
+  }
+  const up = delta > 0;
+  const color = up ? "#1f8a4c" : "#d23f3f";
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 font-mono text-xs tabular-nums"
+      style={{ color }}
+      title={up ? `Up ${delta}` : `Down ${Math.abs(delta)}`}
+      aria-label={up ? `Up ${delta}` : `Down ${Math.abs(delta)}`}
+    >
+      <span aria-hidden>{up ? "▲" : "▼"}</span>
+      {Math.abs(delta)}
+    </span>
   );
 }
 
@@ -150,7 +209,17 @@ function LevelBadge({ level }: { level: ReturnType<typeof levelForRating> }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ monthly = false }: { monthly?: boolean }) {
+  if (monthly) {
+    return (
+      <div className="card p-12 text-center">
+        <h2 className="font-display text-2xl tracking-tight mb-2">No games this period</h2>
+        <p className="text-body-muted max-w-md mx-auto">
+          No events fall in the selected month. Pick another period or view the all-time board.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="card p-12 text-center">
       <h2 className="font-display text-2xl tracking-tight mb-2">No events yet</h2>

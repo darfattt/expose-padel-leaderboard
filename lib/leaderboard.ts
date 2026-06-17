@@ -1,6 +1,15 @@
 import { type Archetype, type Attributes, type ArchetypeField, computeAttributes, pickArchetype } from "./archetype";
 import { type PlayerMetrics, computeMetrics, fieldStats } from "./stats";
 import { type RatingField, computeRating, isProvisional } from "./rating";
+import {
+  type RankedPlayerWithChange,
+  type RawResult,
+  aggregateResults,
+  filterByMonth,
+  monthsFromResults,
+  resultsBeforeLatest,
+  withRankChange,
+} from "./standings";
 import { createReadClient } from "./supabase/server";
 import type { CareerStatRow } from "./types";
 
@@ -106,4 +115,66 @@ export async function getRatingField(): Promise<RatingField> {
 export async function getRankedPlayer(playerId: string): Promise<RankedPlayer | null> {
   const board = await getLeaderboard();
   return board.find((p) => p.row.player_id === playerId) ?? null;
+}
+
+// Raw, un-aggregated match-player facts (one row per game played), optionally
+// scoped to a club. Re-aggregated in TS (see lib/standings.ts) so a board can be
+// sliced by time. Returns [] when Supabase isn't configured or has no data.
+export async function fetchRawResults(clubId?: string): Promise<RawResult[]> {
+  try {
+    const supabase = createReadClient();
+    let query = supabase
+      .from("match_players")
+      .select(
+        "player_id, points, conceded, won, is_draw, players!inner(name), matches!inner(event_id, events!inner(played_on, club_id))"
+      );
+    if (clubId) query = query.eq("matches.events.club_id", clubId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => {
+      const player = Array.isArray(r.players) ? r.players[0] : r.players;
+      const match = Array.isArray(r.matches) ? r.matches[0] : r.matches;
+      const ev = Array.isArray(match.events) ? match.events[0] : match.events;
+      return {
+        playerId: r.player_id as string,
+        name: (player as { name: string }).name,
+        points: r.points as number,
+        conceded: r.conceded as number,
+        won: r.won as boolean,
+        isDraw: r.is_draw as boolean,
+        eventId: match.event_id as string,
+        playedOn: (ev as { played_on: string | null })?.played_on ?? null,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export interface LeaderboardView {
+  board: RankedPlayerWithChange[];
+  months: string[]; // yyyy-mm with at least one dated game, newest first
+  period: string; // resolved period: "all" or a yyyy-mm month
+}
+
+// The leaderboard for a club + time period, with rank-change arrows.
+//   period "all" (default): the full field, each row diffed against the
+//     standings *before the most recent event* (the up/down indicator).
+//   period "yyyy-mm": only that month's games; no movement arrows (a month is a
+//     standalone board, not a continuation of the all-time one).
+// An unknown/undated period silently falls back to "all".
+export async function getLeaderboardView(clubId?: string, period?: string): Promise<LeaderboardView> {
+  const results = await fetchRawResults(clubId);
+  const months = monthsFromResults(results);
+  const resolved = period && months.includes(period) ? period : "all";
+
+  if (resolved !== "all") {
+    const current = rankPlayers(aggregateResults(filterByMonth(results, resolved)));
+    return { board: withRankChange(current, null), months, period: resolved };
+  }
+
+  const current = rankPlayers(aggregateResults(results));
+  const before = resultsBeforeLatest(results);
+  const previous = before === null ? null : rankPlayers(aggregateResults(before));
+  return { board: withRankChange(current, previous), months, period: "all" };
 }
