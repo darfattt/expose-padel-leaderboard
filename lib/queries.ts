@@ -100,6 +100,39 @@ export async function getPlayerGear(id: string): Promise<PlayerGear> {
   }
 }
 
+// The racket each player has set on their profile, keyed by player id. Players
+// who haven't picked a racket are omitted. Returns an empty map when Supabase
+// isn't configured, so the racket leaderboard renders an empty state.
+export interface PlayerRacket {
+  brand: string;
+  name: string | null;
+  image: string | null;
+}
+
+export async function getPlayerRackets(): Promise<Map<string, PlayerRacket>> {
+  const byPlayer = new Map<string, PlayerRacket>();
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("players")
+      .select("id, racket_brand, racket_name, racket_image")
+      .not("racket_brand", "is", null);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const brand = ((row.racket_brand as string | null) ?? "").trim();
+      if (!brand) continue;
+      byPlayer.set(row.id as string, {
+        brand,
+        name: (row.racket_name as string | null) ?? null,
+        image: (row.racket_image as string | null) ?? null,
+      });
+    }
+    return byPlayer;
+  } catch {
+    return byPlayer;
+  }
+}
+
 // Full match history for a player: each game with partner, opponents, score,
 // and result, newest event first. Two queries + in-memory grouping (no N+1).
 export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEntry[]> {
