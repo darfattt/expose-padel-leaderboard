@@ -36,7 +36,7 @@ export default async function LeaderboardPage({
         </h1>
         <p className="text-body-muted text-xs mt-5 max-w-xl">
           Ratings blend win rate, point differential, and scoring across {activeClub ? "this club's" : "all uploaded"} events,
-          on a 0–10 scale mapped to Playtomic-style levels. Upload a Reclub scoresheet to update it.
+          on Playtomic's 0–7 level scale. Upload a Reclub scoresheet to update it.
         </p>
       </section>
 

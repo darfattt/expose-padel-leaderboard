@@ -9,7 +9,7 @@ import type { MatchHistoryEntry } from "./queries";
 import { relationshipSummary } from "./relationships";
 
 // Bump when the prompt/schema changes so cached reports regenerate.
-const PROMPT_VERSION = "v7-relationships";
+const PROMPT_VERSION = "v8-playtomic-7-scale";
 
 export const proComparisonSchema = z.object({
   name: z.string().describe("Full name of a real professional padel player."),
@@ -64,7 +64,7 @@ export function buildReportFacts(input: ReportInput): string {
 
   return [
     `Player: ${r.name}`,
-    `Performance rating: ${player.rating.toFixed(1)}/10${player.provisional ? " (provisional — fewer than 3 games)" : ""}`,
+    `Performance rating: ${player.rating.toFixed(1)}/7 (Playtomic scale)${player.provisional ? " (provisional — fewer than 3 games)" : ""}`,
     `Level: ${level.category} (Playtomic-style) — ${level.description}`,
     `Archetype: ${player.archetype.label} — ${player.archetype.description}`,
     `Attributes (0-100): Power ${a.attack}, Consistency ${a.consistency}, Clutch ${a.clutch}, Win ${a.win}`,
@@ -75,7 +75,7 @@ export function buildReportFacts(input: ReportInput): string {
     `Partnerships, rivalries & form:`,
     relationshipSummary(matches),
     ``,
-    `Pro comparison candidates — FIP men's world ranks #${candidates.rankLow}-#${candidates.rankHigh}, the tier this player's ${player.rating.toFixed(1)}/10 rating maps onto (${candidates.note}). Pick 1-3 of EXACTLY these, no one else:`,
+    `Pro comparison candidates — FIP men's world ranks #${candidates.rankLow}-#${candidates.rankHigh}, the tier this player's ${player.rating.toFixed(1)}/7 rating maps onto (${candidates.note}). Pick 1-3 of EXACTLY these, no one else:`,
     candidates.pros.map((p) => `- ${p}`).join("\n"),
     ``,
     `Match log (most recent first):`,

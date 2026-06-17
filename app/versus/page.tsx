@@ -269,7 +269,7 @@ function Corner({
       <div className="font-display text-[56px] leading-none tracking-tightest mt-4 tabular-nums">
         {player.rating.toFixed(1)}
       </div>
-      <div className="mono-label mt-1">Rating / 10</div>
+      <div className="mono-label mt-1">Rating / 7</div>
       <div className={`mt-5 inline-block ${right ? "text-left" : ""}`}>
         <FormStrip form={form} />
       </div>

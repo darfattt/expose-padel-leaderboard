@@ -10,7 +10,7 @@ import type { CareerStatRow } from "./types";
 // like the rest of lib/; nothing is persisted.
 
 // How far ahead an opponent must be rated for a win to count as a "David" upset.
-export const DAVID_RATING_GAP = 2.0;
+export const DAVID_RATING_GAP = 1.4;
 // Games needed in a single event before sweeping it counts as a clean sheet.
 export const SWEEP_MIN_GAMES = 3;
 // Margin of victory that counts as a blowout (Sharpshooter / Blown Out).
@@ -33,10 +33,12 @@ export const HIGH_WIN_RATE_MIN_GAMES = 20;
 // meaningful number of games.
 export const MR_RELIABLE_CONSISTENCY = 70;
 export const MR_RELIABLE_MIN_GAMES = 10;
-// Rating gained between first and latest event for Big Mover.
-export const BIG_MOVER_GAIN = 1.5;
-// Level bands (lib/levels.ts) that count as "reached Advanced".
-const ADVANCED_LEVELS = new Set(["advanced", "expert", "professional"]);
+// Rating gained between first and latest event for Big Mover. On Playtomic's
+// compressed 0–7 scale a full point is already a sizeable jump.
+export const BIG_MOVER_GAIN = 1.0;
+// Level bands (lib/levels.ts) that count as "reached Advanced" — Playtomic's
+// ADVANCED tier and up, i.e. ratings of 5.5+.
+const ADVANCED_LEVELS = new Set(["contender", "elite", "professional"]);
 // Social / partnership thresholds.
 export const DYNAMIC_DUO_WINS = 5; // wins with one partner
 export const SOCIAL_BUTTERFLY_PARTNERS = 10; // distinct partners

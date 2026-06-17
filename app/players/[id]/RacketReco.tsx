@@ -1,26 +1,49 @@
-import { getRacketRecommendations } from "@/app/actions/player";
+import { getRacketRecommendations, getRacketShape } from "@/app/actions/player";
 import type { Attributes } from "@/lib/archetype";
-import { racketCriteria } from "@/lib/racket-reco";
+import {
+  ownedRacketContrast,
+  playStyleBlurb,
+  racketCriteria,
+  shapeToStyle,
+} from "@/lib/racket-reco";
+import type { PlayerGear } from "@/lib/types";
 
 // Async server component: the third-party Padelful call streams in behind a
 // Suspense boundary so it never blocks the player page (mirrors ReportCardAsync).
 export default async function RacketRecoAsync({
   rating,
   attributes,
+  gear,
 }: {
   rating: number;
   attributes: Attributes;
+  gear: PlayerGear;
 }) {
   const recs = (await getRacketRecommendations(rating, attributes)).slice(0, 3);
   if (recs.length === 0) return null;
 
   const { level, playStyle } = racketCriteria(rating, attributes);
 
+  // Coaching line: contrast the player's computed style against the frame they
+  // actually own (classified from its shape). Skipped when no racket is set or
+  // its shape is unknown.
+  let contrast: string | null = null;
+  if (gear.racketSlug) {
+    const ownedStyle = shapeToStyle(await getRacketShape(gear.racketSlug));
+    contrast = ownedRacketContrast(playStyle, ownedStyle, gear.racketName ?? "current racket");
+  }
+
   return (
     <div className="mt-5 border-t border-hairline pt-4">
-      <p className="mono-label mb-3">
+      <p className="mono-label mb-1">
         Racket picks · {level} · {playStyle}
       </p>
+      <p className="mb-3 text-xs text-body-muted">{playStyleBlurb(playStyle)}</p>
+      {contrast && (
+        <p className="mb-3 border-l-2 border-card-border pl-2 text-xs text-body-muted">
+          {contrast}
+        </p>
+      )}
       <ul className="space-y-1">
         {recs.map((r) => (
           <li key={r.slug}>
@@ -37,6 +60,11 @@ export default async function RacketRecoAsync({
                 <span className="block text-xs text-body-muted truncate">
                   {[r.brand, r.shape, r.feel].filter(Boolean).join(" · ")}
                 </span>
+                {r.matchReason && (
+                  <span className="mt-0.5 block text-xs text-body-muted line-clamp-2">
+                    {r.matchReason}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 text-right">
                 {r.price != null && (

@@ -92,7 +92,7 @@ export function buildRatingHistory(
       eventId,
       eventTitle: ev.title,
       playedOn: ev.playedOn,
-      rating: computeRating(computeMetrics(row), field),
+      rating: computeRating(computeMetrics(row), field, { games, wins }),
       games,
     });
   }

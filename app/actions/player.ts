@@ -92,26 +92,43 @@ function toRecommendation(r: PadelfulRecommendation): RacketRecommendation {
   };
 }
 
-// The recommendations endpoint omits the product shot, so look it up per slug
-// from GET /api/v1/rackets/{slug}. Cached (stable catalogue); returns null on
-// any miss so a recommendation simply renders without an image.
-const fetchRacketImage = unstable_cache(
-  async (slug: string): Promise<string | null> => {
+// The recommendations endpoint omits the product shot (and a player's own racket
+// stores no shape), so look both up per slug from GET /api/v1/rackets/{slug}.
+// Cached (stable catalogue); returns nulls on any miss so callers degrade.
+interface RacketDetail {
+  image: string | null;
+  shape: string | null;
+}
+
+const fetchRacketDetail = unstable_cache(
+  async (slug: string): Promise<RacketDetail> => {
     try {
       const res = await fetch(`${PADELFUL_BASE}/api/v1/rackets/${encodeURIComponent(slug)}`, {
         headers: { accept: "application/json" },
         next: { revalidate: 86_400 },
       });
-      if (!res.ok) return null;
-      const json = (await res.json()) as { data?: { racket?: { image?: string | null } } };
-      return toAbsoluteImage(json.data?.racket?.image);
+      if (!res.ok) return { image: null, shape: null };
+      const json = (await res.json()) as {
+        data?: { racket?: { image?: string | null; shape?: string | null } };
+      };
+      return {
+        image: toAbsoluteImage(json.data?.racket?.image),
+        shape: json.data?.racket?.shape ?? null,
+      };
     } catch {
-      return null;
+      return { image: null, shape: null };
     }
   },
-  ["racket-image"],
+  ["racket-detail"],
   { revalidate: 86_400 }
 );
+
+// Shape ("Diamond" | "Round" | "Teardrop" | …) for a single racket slug, so a
+// player's own racket can be classified power/control on the profile. Null on
+// any miss (the contrast line simply isn't drawn).
+export async function getRacketShape(slug: string): Promise<string | null> {
+  return (await fetchRacketDetail(slug)).shape;
+}
 
 // POST is not cached by Next's fetch Data Cache, so cache the result ourselves
 // keyed by the (level, playStyle) criteria — only nine combinations exist, and
@@ -130,7 +147,7 @@ const fetchRecommendations = unstable_cache(
     };
     const recs = (json.data?.recommendations ?? []).map(toRecommendation);
     return Promise.all(
-      recs.map(async (r) => ({ ...r, image: await fetchRacketImage(r.slug) }))
+      recs.map(async (r) => ({ ...r, image: (await fetchRacketDetail(r.slug)).image }))
     );
   },
   ["racket-recommendations"],

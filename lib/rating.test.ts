@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { rankPlayers } from "./leaderboard";
 import { levelForRating } from "./levels";
+import { capForReliability } from "./rating";
 import type { CareerStatRow } from "./types";
 
 function row(p: Partial<CareerStatRow> & { player_id: string; name: string }): CareerStatRow {
@@ -95,10 +96,10 @@ describe("rankPlayers", () => {
     expect(ranked[ranked.length - 1].row.player_id).toBe("newbie");
   });
 
-  it("keeps every rating within 0..10", () => {
+  it("keeps every rating within 0..7", () => {
     for (const p of ranked) {
       expect(p.rating).toBeGreaterThanOrEqual(0);
-      expect(p.rating).toBeLessThanOrEqual(10);
+      expect(p.rating).toBeLessThanOrEqual(7);
     }
   });
 
@@ -111,6 +112,13 @@ describe("rankPlayers", () => {
     }
   });
 
+  it("holds a thin record below the level-4 reliability gate", () => {
+    // A perfect but tiny sample (2 games, 2 wins) hasn't cleared even the
+    // level-4 bar, so it can't be rated into the 4.x band.
+    const newbie = ranked.find((p) => p.row.player_id === "newbie")!;
+    expect(newbie.rating).toBeLessThan(4);
+  });
+
   it("gives the dominant player the top rating and a non-balanced archetype", () => {
     const ace = ranked.find((p) => p.row.player_id === "ace")!;
     const low = ranked.find((p) => p.row.player_id === "low")!;
@@ -119,5 +127,26 @@ describe("rankPlayers", () => {
     const rankedRatings = ranked.filter((p) => !p.provisional).map((p) => p.rating);
     expect(ace.rating).toBe(Math.max(...rankedRatings));
     expect(ace.archetype.key).not.toBe("balanced");
+  });
+});
+
+describe("capForReliability", () => {
+  it("caps a record below the level-4 gate under 4.0", () => {
+    expect(capForReliability(6.5, { games: 3, wins: 3 })).toBeLessThan(4);
+    expect(capForReliability(6.5, { games: 20, wins: 4 })).toBeLessThan(4); // games ok, too few wins
+  });
+
+  it("unlocks one band at a time as games and wins grow", () => {
+    expect(capForReliability(7, { games: 10, wins: 6 })).toBeLessThan(5); // cleared L4, not L5
+    expect(capForReliability(7, { games: 16, wins: 10 })).toBeLessThan(6); // cleared L5, not L6
+    expect(capForReliability(7, { games: 22, wins: 14 })).toBeLessThan(7); // cleared L6, not L7
+  });
+
+  it("lets a fully proven record reach the top of the ladder", () => {
+    expect(capForReliability(7, { games: 30, wins: 20 })).toBe(7);
+  });
+
+  it("never lowers a rating already under the unlocked ceiling", () => {
+    expect(capForReliability(3.2, { games: 3, wins: 1 })).toBe(3.2);
   });
 });

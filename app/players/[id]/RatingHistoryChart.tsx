@@ -53,8 +53,8 @@ export default function RatingHistoryChart({ history }: { history: RatingHistory
           interval="preserveStartEnd"
         />
         <YAxis
-          domain={[0, 10]}
-          ticks={[0, 2, 4, 6, 8, 10]}
+          domain={[0, 7]}
+          ticks={[0, 1, 2, 3, 4, 5, 6, 7]}
           tick={{ fill: "#616161", fontSize: 11, fontFamily: "var(--font-sans)" }}
           axisLine={false}
           tickLine={false}

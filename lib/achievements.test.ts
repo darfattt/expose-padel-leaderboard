@@ -101,7 +101,7 @@ describe("computeAchievements — field-relative badges", () => {
   const ctx: AchievementContext = {
     rank: 2,
     topRankIds: new Set(["star"]),
-    ratingById: new Map([["self", 4.0], ["star", 9.0]]),
+    ratingById: new Map([["self", 4.0], ["star", 6.5]]),
     selfRating: 4.0,
   };
 
@@ -244,12 +244,12 @@ describe("computeAchievements — rank & rating context", () => {
 
   it("earns Level Up at Advanced rating and above", () => {
     expect(byKey(career(), [], ctx({ selfRating: 7.0 })).get("level-up")!.earned).toBe(true);
-    expect(byKey(career(), [], ctx({ selfRating: 4.0 })).get("level-up")!.earned).toBe(false);
+    expect(byKey(career(), [], ctx({ selfRating: 3.0 })).get("level-up")!.earned).toBe(false);
   });
 
-  it("earns Big Mover on a 1.5+ rating gain from the first event", () => {
-    expect(byKey(career(), [], ctx({ ratingHistory: [4.0, 6.0] })).get("big-mover")!.earned).toBe(true);
-    expect(byKey(career(), [], ctx({ ratingHistory: [4.0, 5.0] })).get("big-mover")!.earned).toBe(false);
+  it("earns Big Mover on a 1.0+ rating gain from the first event", () => {
+    expect(byKey(career(), [], ctx({ ratingHistory: [3.0, 4.5] })).get("big-mover")!.earned).toBe(true);
+    expect(byKey(career(), [], ctx({ ratingHistory: [3.0, 3.5] })).get("big-mover")!.earned).toBe(false);
   });
 });
 

@@ -39,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/versus" className="hover:text-ink">Versus</Link>
             <Link href="/events" className="hover:text-ink">Events</Link>
             <Link href="/scatter" className="hover:text-ink">Scatter analysis</Link>
+            <Link href="/how-it-works" className="hover:text-ink">How it works</Link>
             <Link href="/upload" className="hover:text-ink">Upload</Link>
           </nav>
           <Link href="/upload" className="btn-primary">Upload scoresheet</Link>

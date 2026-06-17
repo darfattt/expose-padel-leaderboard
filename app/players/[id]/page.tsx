@@ -6,6 +6,7 @@ import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboa
 import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerGear, getPlayerMatchHistory } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
+import { nextReliabilityGate, reliabilityCap } from "@/lib/rating";
 import { venueHook } from "@/lib/gossip";
 import { bestVenue, computeForm, partnerChemistry, rivalries } from "@/lib/relationships";
 import AchievementsCard from "./AchievementsCard";
@@ -112,10 +113,13 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             <div className="font-display text-[64px] leading-none tracking-tightest">
               {player.rating.toFixed(1)}
             </div>
-            <div className="mono-label mt-1">Rating / 10</div>
+            <div className="mono-label mt-1">Rating / 7</div>
           </div>
         </div>
       </div>
+
+      {/* Reliability gate: shown only while it actively caps the rating */}
+      <ReliabilityGate games={r.games} wins={r.wins} rating={player.rating} />
 
       {/* Recent form + gossip hooks (deterministic one-liner + LLM column) */}
       {form.recent.length > 0 || venueGossip ? (
@@ -149,7 +153,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             ))}
           </div>
           <Suspense fallback={<RacketRecoSkeleton />}>
-            <RacketRecoAsync rating={player.rating} attributes={a} />
+            <RacketRecoAsync rating={player.rating} attributes={a} gear={gear} />
           </Suspense>
         </div>
         <Suspense fallback={<ReportCardSkeleton />}>
@@ -260,6 +264,43 @@ function BackLink() {
     <Link href="/" className="btn-secondary text-sm">
       ← Leaderboard
     </Link>
+  );
+}
+
+// "X more wins to unlock <Band>" — only rendered while the reliability gate is
+// the binding constraint (the rating sits exactly at the band ceiling). A
+// performance-limited player sees nothing, since unlocking wouldn't lift them.
+function ReliabilityGate({ games, wins, rating }: { games: number; wins: number; rating: number }) {
+  const cap = reliabilityCap({ games, wins });
+  const gate = nextReliabilityGate({ games, wins });
+  if (!gate || rating < cap - 1e-9) return null;
+
+  const band = levelForRating(gate.tier.level);
+  const needs = [
+    gate.gamesNeeded > 0 ? `${gate.gamesNeeded} more ${gate.gamesNeeded === 1 ? "game" : "games"}` : null,
+    gate.winsNeeded > 0 ? `${gate.winsNeeded} more ${gate.winsNeeded === 1 ? "win" : "wins"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
+
+  return (
+    <div className="card p-4 mb-10 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="mono-label">Next level</span>
+      <span
+        className="level-chip"
+        style={{ color: band.color, borderColor: `${band.color}55`, backgroundColor: `${band.color}12` }}
+      >
+        <span aria-hidden>{band.badge}</span>
+        {band.category}
+      </span>
+      <span className="text-sm text-body-muted">
+        {needs} to unlock <span className="text-ink font-medium">{band.category}</span> (level{" "}
+        {gate.tier.level.toFixed(1)}). Your rating is held at {cap.toFixed(1)} until then.
+      </span>
+      <Link href="/how-it-works" className="btn-secondary text-sm sm:ml-auto">
+        How rating works
+      </Link>
+    </div>
   );
 }
 

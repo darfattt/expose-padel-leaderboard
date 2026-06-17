@@ -7,7 +7,7 @@ import type { AttributeKey } from "./archetype";
 //
 // Source of truth is the live FIP men's top-90 ranking (data/fip_men_…json),
 // which carries each pro's official rank + headshot URL. We pick comparison
-// candidates by RANK: a player's 0–10 rating maps onto the rank ladder, so the
+// candidates by RANK: a player's 0–7 rating maps onto the rank ladder, so the
 // best local players get compared to the world's #1-caliber pros and weaker
 // players to lower-ranked pros. The archetype then rotates *which* slice of that
 // rank band is offered, so two players at the same rating but different styles
@@ -75,7 +75,7 @@ export interface ProCandidates {
 const WINDOW = 8; // pros considered around the rating-mapped rank
 const PICKS = 4; // how many candidates we actually hand to the model
 
-// Candidate pros for a player, chosen by rating→rank. rating 10 → top of the
+// Candidate pros for a player, chosen by rating→rank. rating 7 → top of the
 // ladder (rank ~1); rating 0 → bottom of the top-90. The archetype rotates which
 // PICKS pros within the window are offered.
 export function proCandidates(
@@ -83,8 +83,8 @@ export function proCandidates(
   archetypeKey: AttributeKey | "balanced"
 ): ProCandidates {
   const n = PROS.length;
-  const clamped = Math.min(10, Math.max(0, rating));
-  const center = Math.round((1 - clamped / 10) * (n - 1));
+  const clamped = Math.min(7, Math.max(0, rating));
+  const center = Math.round((1 - clamped / 7) * (n - 1));
   const size = Math.min(WINDOW, n);
   const start = Math.min(Math.max(center - Math.floor(size / 2), 0), n - size);
   const window = PROS.slice(start, start + size);

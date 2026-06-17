@@ -7,7 +7,7 @@ import { MIN_SHARED_GAMES } from "./relationships";
 // rivalry overrides the rating prior while a single meeting barely nudges it.
 // Pure + field-free like the rest of lib/ — computed on read, nothing persisted.
 
-// Logistic steepness on the 0–10 rating scale. A 1.0-point edge ⇒ ~65%, a
+// Logistic steepness on the 0–7 rating scale. A 1.0-point edge ⇒ ~65%, a
 // 2.0-point edge ⇒ ~77%. Tuned to feel right for recreational padel rather than
 // to model true odds (the field is small and ratings move fast).
 export const RATING_K = 0.6;
