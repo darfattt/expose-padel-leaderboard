@@ -27,7 +27,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
       <div className="mt-4 mb-10">
         <p className="mono-label mb-3">Event recap</p>
         <h1 className="font-display text-[48px] leading-none tracking-tight">{event.title}</h1>
-        <p className="text-body-muted mt-3">
+        {event.club_name && <p className="mono-label mt-3">{event.club_name}</p>}
+        <p className="text-body-muted mt-2">
           {[event.played_on, event.location, event.format].filter(Boolean).join(" · ")}
         </p>
         <div className="flex gap-6 mt-5 text-sm text-body-muted">

@@ -71,6 +71,16 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
   const bytes = await readPdf(formData);
   if ("error" in bytes) return { ok: false, error: bytes.error };
 
+  // Verify the upload password (set UPLOAD_PASSWORD in the environment).
+  const requiredPassword = process.env.UPLOAD_PASSWORD;
+  if (!requiredPassword) {
+    return { ok: false, error: "Uploads are disabled — UPLOAD_PASSWORD is not configured." };
+  }
+  const password = (formData.get("password") as string | null)?.trim() ?? "";
+  if (password !== requiredPassword) {
+    return { ok: false, error: "Incorrect password." };
+  }
+
   let parsed: ParsedScoresheet;
   try {
     const name = (formData.get("file") as File).name;
@@ -78,6 +88,15 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
   } catch (e) {
     return { ok: false, error: `Could not parse PDF: ${(e as Error).message}` };
   }
+
+  // Apply user-edited event title / date from the preview form, if provided.
+  const editedTitle = (formData.get("title") as string | null)?.trim();
+  if (editedTitle) parsed.event.title = editedTitle;
+  const editedDate = (formData.get("playedOn") as string | null)?.trim();
+  if (editedDate) parsed.event.playedOn = editedDate;
+
+  // Club the scoresheet belongs to (selected in the preview form).
+  const clubId = (formData.get("clubId") as string | null)?.trim() || null;
 
   const contentHash = scoresheetHash(parsed);
 
@@ -108,6 +127,7 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
       format: event.format,
       num_courts: event.numCourts,
       num_players: event.numPlayers,
+      club_id: clubId,
       source_filename: (formData.get("file") as File).name,
       content_hash: contentHash,
     })

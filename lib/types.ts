@@ -24,10 +24,19 @@ export interface ParsedScoresheet {
   warnings: string[];
 }
 
+// A padel club / community that owns uploaded events.
+export interface Club {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 // Aggregate row from the player_career_stats view (raw, pre-rating).
+// When scoped to a club (player_club_stats) club_id is also present.
 export interface CareerStatRow {
   player_id: string;
   name: string;
+  club_id?: string;
   games: number;
   wins: number;
   losses: number;

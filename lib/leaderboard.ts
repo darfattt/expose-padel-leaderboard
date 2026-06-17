@@ -16,12 +16,17 @@ export interface RankedPlayer {
   provisional: boolean;
 }
 
-// Pull career stats for the whole field. Returns [] when Supabase isn't
-// configured or the table is empty, so pages can render an empty state.
-export async function fetchCareerStats(): Promise<CareerStatRow[]> {
+// Pull career stats for the whole field. When clubId is given, stats are scoped
+// to that club (player_club_stats); otherwise they aggregate every club
+// (player_career_stats). Returns [] when Supabase isn't configured or the table
+// is empty, so pages can render an empty state.
+export async function fetchCareerStats(clubId?: string): Promise<CareerStatRow[]> {
   try {
     const supabase = createReadClient();
-    const { data, error } = await supabase.from("player_career_stats").select("*");
+    const query = clubId
+      ? supabase.from("player_club_stats").select("*").eq("club_id", clubId)
+      : supabase.from("player_career_stats").select("*");
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []) as CareerStatRow[];
   } catch {
@@ -83,8 +88,9 @@ export function rankPlayers(rows: CareerStatRow[]): RankedPlayer[] {
   }));
 }
 
-export async function getLeaderboard(): Promise<RankedPlayer[]> {
-  return rankPlayers(await fetchCareerStats());
+// clubId scopes the board to a single club; omit it for the global board.
+export async function getLeaderboard(clubId?: string): Promise<RankedPlayer[]> {
+  return rankPlayers(await fetchCareerStats(clubId));
 }
 
 // The field normalization used by computeRating, built from the whole field.

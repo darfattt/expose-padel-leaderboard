@@ -31,6 +31,19 @@ export interface EventRow {
   num_players: number | null;
   source_filename: string | null;
   created_at: string;
+  club_id: string | null;
+  club_name: string | null;
+}
+
+// Supabase rows before flattening the embedded clubs relation.
+type RawEventRow = Omit<EventRow, "club_name"> & {
+  clubs: { name: string } | { name: string }[] | null;
+};
+
+function flattenEvent(row: RawEventRow): EventRow {
+  const { clubs, ...rest } = row;
+  const club = Array.isArray(clubs) ? clubs[0] : clubs;
+  return { ...rest, club_name: club?.name ?? null };
 }
 
 export interface EventMatch {
@@ -143,11 +156,11 @@ export async function getEvents(): Promise<EventRow[]> {
     const supabase = createReadClient();
     const { data, error } = await supabase
       .from("events")
-      .select("*")
+      .select("*, clubs(name)")
       .order("played_on", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []) as EventRow[];
+    return ((data ?? []) as RawEventRow[]).map(flattenEvent);
   } catch {
     return [];
   }
@@ -156,9 +169,13 @@ export async function getEvents(): Promise<EventRow[]> {
 export async function getEvent(id: string): Promise<EventRow | null> {
   try {
     const supabase = createReadClient();
-    const { data, error } = await supabase.from("events").select("*").eq("id", id).single();
+    const { data, error } = await supabase
+      .from("events")
+      .select("*, clubs(name)")
+      .eq("id", id)
+      .single();
     if (error) throw error;
-    return data as EventRow;
+    return flattenEvent(data as RawEventRow);
   } catch {
     return null;
   }

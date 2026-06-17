@@ -30,11 +30,12 @@ export default async function EventsPage() {
 }
 
 function EventsList({ events }: { events: Awaited<ReturnType<typeof getEvents>> }) {
-  const cols = "grid-cols-[1fr_10rem_8rem_5rem_5rem]";
+  const cols = "grid-cols-[1fr_8rem_10rem_8rem_5rem_5rem]";
   return (
     <div className="border-t border-hairline">
       <div className={`hidden sm:grid ${cols} gap-4 py-3 mono-label border-b border-hairline`}>
         <span>Event</span>
+        <span>Club</span>
         <span>Date</span>
         <span>Location</span>
         <span className="text-right">Players</span>
@@ -47,6 +48,7 @@ function EventsList({ events }: { events: Awaited<ReturnType<typeof getEvents>> 
           className={`grid ${cols} gap-4 items-center py-4 border-b border-hairline hover:bg-soft-stone/40 transition-colors`}
         >
           <span className="font-display text-lg tracking-tight">{e.title}</span>
+          <span className="text-body-muted truncate">{e.club_name ?? "—"}</span>
           <span className="tabular-nums text-body-muted">{e.played_on ?? "—"}</span>
           <span className="text-body-muted truncate">{e.location ?? "—"}</span>
           <span className="text-right tabular-nums text-body-muted">{e.num_players ?? "—"}</span>

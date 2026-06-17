@@ -1,4 +1,5 @@
 import UploadForm from "./UploadForm";
+import { getClubs } from "@/lib/clubs";
 
 export const metadata = { title: "Upload scoresheet · expose.padelleaderboard" };
 
@@ -6,7 +7,8 @@ export const metadata = { title: "Upload scoresheet · expose.padelleaderboard" 
 // crashes under webpack) — there's nothing static to generate here anyway.
 export const dynamic = "force-dynamic";
 
-export default function UploadPage() {
+export default async function UploadPage() {
+  const clubs = await getClubs();
   return (
     <div className="max-w-3xl">
       <p className="mono-label mb-4">Upload</p>
@@ -17,7 +19,7 @@ export default function UploadPage() {
         We parse every match, dedupe players across events, and update the career leaderboard.
         Nothing is saved until you confirm the preview.
       </p>
-      <UploadForm />
+      <UploadForm clubs={clubs} />
     </div>
   );
 }

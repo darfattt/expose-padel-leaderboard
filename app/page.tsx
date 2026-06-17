@@ -1,32 +1,49 @@
 import Link from "next/link";
 import { getLeaderboard } from "@/lib/leaderboard";
+import { getClubs } from "@/lib/clubs";
 import { levelForRating } from "@/lib/levels";
 
 export const dynamic = "force-dynamic";
 
-export default async function LeaderboardPage() {
-  const board = await getLeaderboard();
+export default async function LeaderboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ club?: string }>;
+}) {
+  const { club: clubParam } = await searchParams;
+  const clubs = await getClubs();
+  const activeClub = clubs.find((c) => c.id === clubParam) ?? null;
+  const board = await getLeaderboard(activeClub?.id);
   const ranked = board.filter((p) => !p.provisional);
   const provisional = board.filter((p) => p.provisional);
 
   return (
     <div>
       {/* Hero */}
-      <section className="mb-16">
+      <section className="mb-10">
         <p className="mono-label mb-4">Expose Leaderboard</p>
         <h1 className="font-display text-[64px] leading-[0.95] tracking-tightest max-w-3xl">
           Every match, every player, one board.
         </h1>
         <p className="text-body-muted text-xs mt-5 max-w-xl">
-          Ratings blend win rate, point differential, and scoring across all uploaded events,
+          Ratings blend win rate, point differential, and scoring across {activeClub ? "this club's" : "all uploaded"} events,
           on a 0–10 scale mapped to Playtomic-style levels. Upload a Reclub scoresheet to update it.
         </p>
-        {/* <div className="mt-7">
-          <Link href="/upload" className="btn-primary">
-            Upload scoresheet
-          </Link>
-        </div> */}
       </section>
+
+      {clubs.length > 0 && (
+        <nav className="mb-10 flex flex-wrap gap-2 border-b border-hairline pb-4">
+          <ClubTab href="/" label="All clubs" active={!activeClub} />
+          {clubs.map((c) => (
+            <ClubTab
+              key={c.id}
+              href={`/?club=${c.id}`}
+              label={c.name}
+              active={activeClub?.id === c.id}
+            />
+          ))}
+        </nav>
+      )}
 
       {board.length === 0 ? (
         <EmptyState />
@@ -102,6 +119,21 @@ function Board({
         );
       })}
     </div>
+  );
+}
+
+function ClubTab({ href, label, active }: { href: string; label: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={`rounded-full border px-4 py-1.5 text-sm transition-colors ${
+        active
+          ? "border-primary bg-primary text-white"
+          : "border-card-border text-body-muted hover:border-slate hover:text-ink"
+      }`}
+    >
+      {label}
+    </Link>
   );
 }
 
