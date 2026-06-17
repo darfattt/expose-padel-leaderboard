@@ -7,6 +7,8 @@ import {
   RATING_WEIGHTS,
   RELIABILITY_TIERS,
 } from "@/lib/rating";
+import { DECAY_GRACE_DAYS, DECAY_MAX } from "@/lib/decay";
+import DecayCurve from "./DecayCurve";
 
 export const metadata: Metadata = {
   title: "How it works · padel leaderboard",
@@ -141,6 +143,21 @@ export default function HowItWorksPage() {
           what’s holding your rating down. A hot two-game streak can’t fake an
           Elite rating.
         </p>
+      </Section>
+
+      {/* 3b · Inactivity rust */}
+      <Section tag="Step 3½" title="Inactivity rust">
+        <p>
+          Skill is what you&apos;ve proven; <b>freshness</b> is whether you&apos;ve shown up lately.
+          A full <b>{DECAY_GRACE_DAYS}-day</b> grace window costs nothing — recreational players
+          miss weeks. Past that, the live rating sheds a little each day (capped at{" "}
+          <b>−{DECAY_MAX.toFixed(1)}</b>), so someone who stops playing slowly slides down the board
+          until they return and knock the rust off. It never resets you to zero, and one event
+          restores your full skill rating.
+        </p>
+        <div className="card p-4 sm:p-6 mt-4">
+          <DecayCurve />
+        </div>
       </Section>
 
       {/* 4 · Provisional */}

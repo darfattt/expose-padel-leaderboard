@@ -19,6 +19,24 @@ export function winPct(r: { winRate: number }): string {
   return `${Math.round(r.winRate * 100)}%`;
 }
 
+// A compact win-rate bar: a deep-green fill proportional to the win rate over a
+// hairline track, with the percentage to its right. Turns the partner/rival
+// tables into a quick at-a-glance heatmap of who a player wins with and against.
+export function WinRateBar({ winRate }: { winRate: number }) {
+  const pct = Math.round(Math.min(1, Math.max(0, winRate)) * 100);
+  return (
+    <span className="flex items-center gap-2">
+      <span className="relative h-1.5 flex-1 rounded-full bg-soft-stone overflow-hidden">
+        <span
+          className="absolute inset-y-0 left-0 rounded-full bg-deep-green"
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="font-mono tabular-nums text-xs text-body-muted w-9 text-right">{pct}%</span>
+    </span>
+  );
+}
+
 // A "gossip stats" hook line — a coral callout (matching the archetype-chip
 // palette) for the punchy one-liner above each section. Renders nothing when
 // there's no hook to show.

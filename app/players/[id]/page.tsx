@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { computeAchievements } from "@/lib/achievements";
+import { ppgTrend, ratingHistogram } from "@/lib/distribution";
 import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets } from "@/lib/queries";
@@ -14,10 +15,12 @@ import AchievementsCard from "./AchievementsCard";
 import AttributeRadar from "./AttributeRadar";
 import FormStrip from "./FormStrip";
 import GearCard from "./GearCard";
+import RatingHistogram from "@/app/trends/RatingHistogram";
 import GossipCardAsync from "./GossipCardAsync";
 import GossipCardSkeleton from "./GossipCardSkeleton";
 import { GossipLine } from "./relationship-ui";
 import PartnerChemistryCard from "./PartnerChemistryCard";
+import PpgSparkline from "./PpgSparkline";
 import RacketRecoAsync, { RacketRecoSkeleton } from "./RacketReco";
 import RatingHistoryChart from "./RatingHistoryChart";
 import ReportCardAsync from "./ReportCardAsync";
@@ -67,6 +70,8 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   const a = player.attributes;
   const level = levelForRating(player.rating);
   const ratingHistory = buildRatingHistory(matches, ratingField, { id: r.player_id, name: r.name });
+  const ppg = ppgTrend(matches);
+  const fieldBins = ratingHistogram(board.filter((p) => p.row.games > 0).map((p) => p.rating));
   const form = computeForm(matches);
   const chemistry = partnerChemistry(matches);
   const rivalry = rivalries(matches);
@@ -207,6 +212,24 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         </div>
       ) : null}
 
+      {/* Scoring form + field position */}
+      {ppg.length >= 2 ? (
+        <div className="card p-6 mb-6">
+          <p className="mono-label mb-1">Scoring form</p>
+          <p className="text-body-muted text-sm mb-3">
+            Average points per game, event by event · hover for detail.
+          </p>
+          <PpgSparkline points={ppg} />
+        </div>
+      ) : null}
+      <div className="card p-6 mb-12">
+        <p className="mono-label mb-1">Field position</p>
+        <p className="text-body-muted text-sm mb-4">
+          Where this rating sits across the field&apos;s level bands.
+        </p>
+        <RatingHistogram bins={fieldBins} markerRating={player.rating} height={200} />
+      </div>
+
       {/* Partnerships & rivalries */}
       <div className="grid md:grid-cols-2 gap-6 mb-12">
         <PartnerChemistryCard chemistry={chemistry} />
@@ -304,22 +327,53 @@ function ReliabilityGate({ score, wins, rating }: { score: number; wins: number;
     .join(" and ");
 
   return (
-    <div className="card p-4 mb-10 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="mono-label">Next level</span>
-      <span
-        className="level-chip"
-        style={{ color: band.color, borderColor: `${band.color}55`, backgroundColor: `${band.color}12` }}
-      >
-        <span aria-hidden>{band.badge}</span>
-        {band.category}
-      </span>
-      <span className="text-sm text-body-muted">
-        {needs} to unlock <span className="text-ink font-medium">{band.category}</span> (level{" "}
-        {gate.tier.level.toFixed(1)}). Your rating is held at {cap.toFixed(1)} until then.
-      </span>
-      <Link href="/how-it-works" className="btn-secondary text-sm sm:ml-auto">
-        How rating works
-      </Link>
+    <div className="card p-4 mb-10">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="mono-label">Next level</span>
+        <span
+          className="level-chip"
+          style={{ color: band.color, borderColor: `${band.color}55`, backgroundColor: `${band.color}12` }}
+        >
+          <span aria-hidden>{band.badge}</span>
+          {band.category}
+        </span>
+        <span className="text-sm text-body-muted">
+          {needs} to unlock <span className="text-ink font-medium">{band.category}</span> (level{" "}
+          {gate.tier.level.toFixed(1)}). Your rating is held at {cap.toFixed(1)} until then.
+        </span>
+        <Link href="/how-it-works" className="btn-secondary text-sm sm:ml-auto">
+          How rating works
+        </Link>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-x-8 gap-y-3 mt-4">
+        <GateBar label="Net points" value={score} target={gate.tier.minScore} />
+        <GateBar label="Wins" value={wins} target={gate.tier.minWins} />
+      </div>
+    </div>
+  );
+}
+
+// A single reliability-gate progress bar: how far the player's earned total
+// (net points or wins) has climbed toward the next band's bar. Green + a tick
+// once that half is cleared, coral while it's still the thing holding them back.
+function GateBar({ label, value, target }: { label: string; value: number; target: number }) {
+  const pct = Math.min(100, Math.round((Math.max(0, value) / target) * 100));
+  const done = value >= target;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-xs mb-1">
+        <span className="mono-label">{label}</span>
+        <span className="font-mono tabular-nums text-body-muted">
+          {Math.min(Math.max(0, value), target)} / {target}
+          {done ? <span className="text-deep-green"> ✓</span> : null}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-soft-stone overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${pct}%`, backgroundColor: done ? "#1f8a4c" : "#ff7759" }}
+        />
+      </div>
     </div>
   );
 }

@@ -2,9 +2,9 @@ import Link from "next/link";
 import { partnerHook } from "@/lib/gossip";
 import type { PartnerChemistry } from "@/lib/relationships";
 import { MIN_SHARED_GAMES } from "@/lib/relationships";
-import { GossipLine, Superlative, recordLabel, winPct } from "./relationship-ui";
+import { GossipLine, Superlative, WinRateBar, recordLabel } from "./relationship-ui";
 
-const COLS = "grid grid-cols-[1fr_3rem_4.5rem_3.5rem] gap-3 items-center";
+const COLS = "grid grid-cols-[1fr_3rem_4.5rem_6rem] gap-3 items-center";
 
 // Who a player wins with. Best/worst callouts (gated by shared games) plus the
 // full partner table. Consumes data already computed from the player's history.
@@ -48,7 +48,7 @@ export default function PartnerChemistryCard({ chemistry }: { chemistry: Partner
               </Link>
               <span className="font-mono tabular-nums text-right">{p.games}</span>
               <span className="font-mono tabular-nums text-right">{recordLabel(p)}</span>
-              <span className="font-mono tabular-nums text-right">{winPct(p)}</span>
+              <WinRateBar winRate={p.winRate} />
             </div>
           ))}
           {partners.length > 3 ? (

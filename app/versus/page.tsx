@@ -5,6 +5,7 @@ import { levelForRating } from "@/lib/levels";
 import { getPlayerMatchHistory } from "@/lib/queries";
 import { computeForm, headToHead, opponentRecords, type PairRecord } from "@/lib/relationships";
 import { pct, predictMatchup } from "@/lib/versus";
+import CompareRadar from "./CompareRadar";
 import FormStrip from "@/app/players/[id]/FormStrip";
 import { GossipLine, RESULT_TEXT, recordLabel, winPct } from "@/app/players/[id]/relationship-ui";
 
@@ -172,6 +173,19 @@ async function Tape({ playerA, playerB }: { playerA: RankedPlayer; playerB: Rank
           </p>
         )}
       </div>
+
+      {/* Attribute overlay */}
+      <section className="mt-14">
+        <p className="mono-label mb-3">Attribute overlay</p>
+        <div className="card p-6">
+          <CompareRadar
+            nameA={playerA.row.name}
+            attrA={playerA.attributes}
+            nameB={playerB.row.name}
+            attrB={playerB.attributes}
+          />
+        </div>
+      </section>
 
       {/* Head-to-head */}
       <section className="mt-14">

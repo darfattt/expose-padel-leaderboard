@@ -1,3 +1,4 @@
+import type { ParticipantRow } from "./h2h-matrix";
 import { createReadClient } from "./supabase/server";
 import type { PlayerGear, PlayerPosition } from "./types";
 
@@ -303,6 +304,35 @@ export async function getEventPlayerResults(eventId: string): Promise<EventPlaye
         conceded: r.conceded as number,
         won: r.won as boolean,
         isDraw: r.is_draw as boolean,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+// Every match-player fact across all events, flattened to the shape the
+// head-to-head matrix consumes (one row per player-in-a-game, with the player's
+// name and score line). Single query, no N+1. Returns [] when Supabase isn't
+// configured, so the matrix page renders an empty state.
+export async function getAllParticipants(): Promise<ParticipantRow[]> {
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("match_players")
+      .select("match_id, team, player_id, points, conceded, won, is_draw, players!inner(name)");
+    if (error) throw error;
+    return (data ?? []).map((r) => {
+      const player = Array.isArray(r.players) ? r.players[0] : r.players;
+      return {
+        matchId: r.match_id as string,
+        team: r.team as number,
+        playerId: r.player_id as string,
+        name: (player as { name: string }).name,
+        won: r.won as boolean,
+        isDraw: r.is_draw as boolean,
+        points: r.points as number,
+        conceded: r.conceded as number,
       };
     });
   } catch {

@@ -2,9 +2,9 @@ import Link from "next/link";
 import { rivalryHook } from "@/lib/gossip";
 import type { Rivalries } from "@/lib/relationships";
 import { MIN_SHARED_GAMES } from "@/lib/relationships";
-import { GossipLine, Superlative, recordLabel, winPct } from "./relationship-ui";
+import { GossipLine, Superlative, WinRateBar, recordLabel } from "./relationship-ui";
 
-const COLS = "grid grid-cols-[1fr_3rem_4.5rem_3.5rem_3rem] gap-3 items-center";
+const COLS = "grid grid-cols-[1fr_3rem_4.5rem_6rem_3rem] gap-3 items-center";
 
 // Who a player wins and loses against. Nemesis/favourite-victim callouts (gated
 // by shared games) plus the full opponent table, each row linking to the H2H page.
@@ -55,7 +55,7 @@ export default function RivalriesCard({
               </Link>
               <span className="font-mono tabular-nums text-right">{o.games}</span>
               <span className="font-mono tabular-nums text-right">{recordLabel(o)}</span>
-              <span className="font-mono tabular-nums text-right">{winPct(o)}</span>
+              <WinRateBar winRate={o.winRate} />
               <Link
                 href={`/players/${playerId}/vs/${o.id}`}
                 className="text-right text-primary hover:opacity-70"
