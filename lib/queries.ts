@@ -14,7 +14,9 @@ export interface MatchHistoryEntry {
   round: number;
   court: number;
   partner: string | null;
+  partnerId: string | null;
   opponents: string[];
+  opponentIds: string[];
   points: number;
   conceded: number;
   result: "W" | "L" | "D";
@@ -120,7 +122,8 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
       const myTeam = r.team as number;
       const sameTeam = others.filter((o) => o.team === myTeam);
       const oppTeam = others.filter((o) => o.team !== myTeam);
-      const partner = sameTeam.find((o) => o.name)?.name ?? null;
+      const partnerEntry = sameTeam.find((o) => o.name);
+      const partner = partnerEntry?.name ?? null;
       const result: "W" | "L" | "D" = r.is_draw ? "D" : r.won ? "W" : "L";
       return {
         matchId: m.id,
@@ -131,7 +134,9 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         round: m.round,
         court: m.court,
         partner,
+        partnerId: partnerEntry?.playerId ?? null,
         opponents: oppTeam.map((o) => o.name),
+        opponentIds: oppTeam.map((o) => o.playerId),
         points: r.points as number,
         conceded: r.conceded as number,
         result,

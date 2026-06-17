@@ -5,10 +5,16 @@ import { getRankedPlayer, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerMatchHistory } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
+import { venueHook } from "@/lib/gossip";
+import { bestVenue, computeForm, partnerChemistry, rivalries } from "@/lib/relationships";
 import AttributeRadar from "./AttributeRadar";
+import FormStrip from "./FormStrip";
+import { GossipLine } from "./relationship-ui";
+import PartnerChemistryCard from "./PartnerChemistryCard";
 import RatingHistoryChart from "./RatingHistoryChart";
 import ReportCardAsync from "./ReportCardAsync";
 import ReportCardSkeleton from "./ReportCardSkeleton";
+import RivalriesCard from "./RivalriesCard";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +45,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   const a = player.attributes;
   const level = levelForRating(player.rating);
   const ratingHistory = buildRatingHistory(matches, ratingField, { id: r.player_id, name: r.name });
+  const form = computeForm(matches);
+  const chemistry = partnerChemistry(matches);
+  const rivalry = rivalries(matches);
+  const venueGossip = venueHook(bestVenue(matches));
 
   return (
     <div>
@@ -79,6 +89,14 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           <div className="mono-label mt-1">Rating / 10</div>
         </div>
       </div>
+
+      {/* Recent form + a gossip hook */}
+      {form.recent.length > 0 || venueGossip ? (
+        <div className="mb-10 space-y-3">
+          {form.recent.length > 0 ? <FormStrip form={form} /> : null}
+          <GossipLine>{venueGossip}</GossipLine>
+        </div>
+      ) : null}
 
       {/* Radar + report */}
       <div className="grid md:grid-cols-2 gap-6 mb-10">
@@ -129,6 +147,12 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
           <RatingHistoryChart history={ratingHistory} />
         </div>
       ) : null}
+
+      {/* Partnerships & rivalries */}
+      <div className="grid md:grid-cols-2 gap-6 mb-12">
+        <PartnerChemistryCard chemistry={chemistry} />
+        <RivalriesCard playerId={id} rivalries={rivalry} />
+      </div>
 
       {/* Match history */}
       <section>
