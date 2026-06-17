@@ -1,5 +1,6 @@
 import { levelForRating } from "./levels";
 import type { MatchHistoryEntry } from "./queries";
+import { type RacketPlayStyle, shapeToStyle } from "./racket-reco";
 import { MAX_RATING, reliabilityCap } from "./rating";
 import { computeForm, opponentRecords, partnerChemistry, venueRecords } from "./relationships";
 import type { RawResult } from "./standings";
@@ -67,6 +68,10 @@ export const HOME_TURF_WINS = 10; // wins at a single venue — your fortress
 export const ROAD_WARRIOR_VENUES = 3; // distinct venues with at least one win
 export const IRON_WEEK_DAYS = 7; // window for "two events inside a week"
 export const WEEKLY_HABIT_WEEKS = 8; // distinct calendar weeks with a game played
+// Gear rarity thresholds (field-relative racket badges). "Rare" / "popular" only
+// mean something once a few people have actually set a racket.
+export const GEAR_MIN_FIELD = 5; // players-with-rackets before rare/popular counts
+export const GEAR_COMMON_MIN = 3; // users sharing the most popular racket to call it "common"
 
 // Named "easter-egg" rivals — these badges are about specific people in the
 // league. Matched by normalized name, so they no-op in leagues without them.
@@ -77,6 +82,14 @@ export const NAMED_RANK_RIVAL = "Bang Econ"; // finish an event above them
 // node:crypto import in). Lowercased, trimmed, inner whitespace collapsed.
 function nameKey(name: string): string {
   return name.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+// A stable identity key for a racket model — prefers the catalogue slug, falls
+// back to the normalized name. null when neither is set (nothing to compare).
+function racketKey(r: { slug: string | null; name: string | null }): string | null {
+  if (r.slug) return r.slug.toLowerCase().trim();
+  if (r.name) return nameKey(r.name);
+  return null;
 }
 
 export interface Achievement {
@@ -109,6 +122,25 @@ export interface AchievementContext {
   consistency?: number;
   // The player's saved gear/position (racket + on-court side) for the gear badges.
   gear?: PlayerGear;
+  // Every player's racket (this one included), so gear badges can compare across
+  // the field: rarest racket, most popular, priciest. Identity fields (brand /
+  // name / slug) drive the rarity badges; the optional shape / price catalogue
+  // metadata light up the power / control / priciest badges when known. Omitted →
+  // those badges simply don't appear.
+  fieldRackets?: FieldRacket[];
+  // This player's computed play style (power/control/balanced; see racket-reco).
+  // Pairs with their racket's shape for the "made for you" style-match badge.
+  playStyle?: RacketPlayStyle;
+}
+
+// One player's racket within the field-wide gear snapshot.
+export interface FieldRacket {
+  playerId: string;
+  brand: string | null;
+  name: string | null;
+  slug: string | null;
+  shape?: string | null; // catalogue shape, e.g. "Diamond" / "Round" / "Teardrop"
+  price?: number | null; // catalogue price, for the Big Spender badge
 }
 
 function countBadge(
@@ -402,6 +434,41 @@ export function computeAchievements(
   const weeks = distinctWeeks(matches);
   const advanced = ctx ? ADVANCED_LEVELS.has(levelForRating(ctx.selfRating).key) : false;
 
+  // --- Gear rarity & spec, all relative to the rest of the field ------------
+  const field = ctx?.fieldRackets ?? [];
+  const selfRacketEntry = ctx?.selfId ? field.find((g) => g.playerId === ctx.selfId) ?? null : null;
+  const selfKey = ctx?.gear
+    ? racketKey({ slug: ctx.gear.racketSlug, name: ctx.gear.racketName })
+    : selfRacketEntry
+      ? racketKey(selfRacketEntry)
+      : null;
+
+  // How many players (incl. this one) wield each racket model.
+  const racketCounts = new Map<string, number>();
+  for (const g of field) {
+    const k = racketKey(g);
+    if (k) racketCounts.set(k, (racketCounts.get(k) ?? 0) + 1);
+  }
+  const fieldSize = field.length;
+  const selfCount = selfKey ? racketCounts.get(selfKey) ?? 0 : 0;
+  const topCount = racketCounts.size ? Math.max(...racketCounts.values()) : 0;
+  // The only one swinging it (and a real field to stand out from).
+  const uniqueGear = !!selfKey && selfCount === 1 && fieldSize >= GEAR_MIN_FIELD;
+  // Swinging the most popular frame, shared by a meaningful crowd.
+  const commonGear =
+    !!selfKey && selfCount === topCount && topCount >= GEAR_COMMON_MIN && fieldSize >= GEAR_MIN_FIELD;
+
+  // Spec-based badges need catalogue metadata (shape / price). They're emitted
+  // only when that data is present, so we never show a permanently-locked badge.
+  const selfShape = selfRacketEntry?.shape ?? null;
+  const selfStyle = shapeToStyle(selfShape);
+  const fieldPrices = field
+    .map((g) => g.price)
+    .filter((p): p is number => typeof p === "number" && p > 0);
+  const selfPrice = selfRacketEntry?.price ?? null;
+  const priciest =
+    selfPrice != null && selfPrice > 0 && fieldPrices.length > 0 && selfPrice >= Math.max(...fieldPrices);
+
   const binary = (
     key: string,
     badge: string,
@@ -411,7 +478,7 @@ export function computeAchievements(
     tone: "good" | "bad" = "good"
   ): Achievement => ({ key, name, badge, description, earned, tone });
 
-  return [
+  const list: Achievement[] = [
     // --- Volume / loyalty ---------------------------------------------------
     countBadge("half-century", "🏆", "Half Century", "Play 50 career games.", row.games, 50),
     countBadge("centurion", "💯", "Centurion", "Play 100 career games.", row.games, 100),
@@ -573,6 +640,9 @@ export function computeAchievements(
       "Complete your profile — racket and position both set.",
       !!ctx?.gear?.racketSlug && !!ctx?.gear?.position
     ),
+    // --- Gear vs the field --------------------------------------------------
+    binary("one-of-a-kind", "🦄", "One of a Kind", "Wield a racket no one else in the league uses.", uniqueGear),
+    binary("crowd-favourite", "👥", "Crowd Favourite", "Swing the league's most popular racket.", commonGear),
     // --- Story ---------------------------------------------------------------
     binary("marathoner", "🏃", "Marathoner", `Play ${MARATHON_GAMES}+ games in one event.`, maxGamesInEvent(matches) >= MARATHON_GAMES),
     binary("comeback-kid", "🔙", "Comeback Kid", `Return after ${COMEBACK_GAP_DAYS}+ days away.`, hasComebackGap(matches)),
@@ -593,4 +663,33 @@ export function computeAchievements(
     countBadge("cold-streak", "🧊", "Cold Streak", "Lose 5 games in a row.", longestResultStreak(matches, "L"), LOSS_STREAK_TARGET, "bad"),
     binary("wooden-spoon", "🥄", "Wooden Spoon", "Finish last in an event.", ctx ? hasWoodenSpoon(ctx) : false, "bad"),
   ];
+
+  // Spec-based gear badges — only surfaced when the racket catalogue metadata
+  // (shape / price) needed to judge them is available, so the catalog never
+  // carries a badge that can't possibly be earned. Inserted just after the
+  // identity gear badges to keep the gear group together.
+  const specBadges: Achievement[] = [];
+  if (selfStyle === "power")
+    specBadges.push(binary("power-frame", "💪", "Power Frame", "Gear up with a power-shaped (diamond) racket.", true));
+  if (selfStyle === "control")
+    specBadges.push(binary("control-frame", "🪶", "Control Frame", "Gear up with a control-shaped (round) racket.", true));
+  if (selfStyle && ctx?.playStyle)
+    specBadges.push(
+      binary(
+        "made-for-you",
+        "🪞",
+        "Made for You",
+        "Your racket's style matches how you actually play.",
+        selfStyle === ctx.playStyle
+      )
+    );
+  if (selfPrice != null && fieldPrices.length > 0)
+    specBadges.push(binary("big-spender", "💸", "Big Spender", "Own the priciest racket in the league.", priciest));
+
+  if (specBadges.length) {
+    const at = list.findIndex((a) => a.key === "crowd-favourite");
+    list.splice(at + 1, 0, ...specBadges);
+  }
+
+  return list;
 }

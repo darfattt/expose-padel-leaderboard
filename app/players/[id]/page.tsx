@@ -4,8 +4,9 @@ import { notFound } from "next/navigation";
 import { computeAchievements } from "@/lib/achievements";
 import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
-import { getPlayer, getPlayerGear, getPlayerMatchHistory } from "@/lib/queries";
+import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
+import { racketPlayStyle } from "@/lib/racket-reco";
 import { nextReliabilityGate, reliabilityCap } from "@/lib/rating";
 import { venueHook } from "@/lib/gossip";
 import { bestVenue, computeForm, partnerChemistry, rivalries } from "@/lib/relationships";
@@ -49,12 +50,19 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
   // Only the fast DB read blocks the page. The LLM Player Report streams in
   // separately via the <Suspense> boundary below, so the page renders at once.
-  const [matches, ratingField, results, gear] = await Promise.all([
+  const [matches, ratingField, results, gear, fieldRacketMap] = await Promise.all([
     getPlayerMatchHistory(id),
     getRatingField(),
     fetchRawResults(),
     getPlayerGear(id),
+    getPlayerRackets(),
   ]);
+  const fieldRackets = [...fieldRacketMap].map(([playerId, rk]) => ({
+    playerId,
+    brand: rk.brand,
+    name: rk.name,
+    slug: rk.slug,
+  }));
   const r = player.row;
   const a = player.attributes;
   const level = levelForRating(player.rating);
@@ -73,6 +81,8 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
     results,
     consistency: player.attributes.consistency,
     gear,
+    fieldRackets,
+    playStyle: racketPlayStyle(player.attributes),
   });
 
   return (

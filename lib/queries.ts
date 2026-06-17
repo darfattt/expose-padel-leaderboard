@@ -106,6 +106,7 @@ export async function getPlayerGear(id: string): Promise<PlayerGear> {
 export interface PlayerRacket {
   brand: string;
   name: string | null;
+  slug: string | null;
   image: string | null;
 }
 
@@ -115,7 +116,7 @@ export async function getPlayerRackets(): Promise<Map<string, PlayerRacket>> {
     const supabase = createReadClient();
     const { data, error } = await supabase
       .from("players")
-      .select("id, racket_brand, racket_name, racket_image")
+      .select("id, racket_brand, racket_name, racket_slug, racket_image")
       .not("racket_brand", "is", null);
     if (error) throw error;
     for (const row of data ?? []) {
@@ -124,6 +125,7 @@ export async function getPlayerRackets(): Promise<Map<string, PlayerRacket>> {
       byPlayer.set(row.id as string, {
         brand,
         name: (row.racket_name as string | null) ?? null,
+        slug: (row.racket_slug as string | null) ?? null,
         image: (row.racket_image as string | null) ?? null,
       });
     }

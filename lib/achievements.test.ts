@@ -449,6 +449,95 @@ describe("computeAchievements — gear & setup", () => {
   });
 });
 
+describe("computeAchievements — gear vs the field", () => {
+  const base = (over: Partial<AchievementContext>): AchievementContext => ({
+    rank: null,
+    topRankIds: new Set(),
+    ratingById: new Map(),
+    selfRating: 5,
+    selfId: "self",
+    ...over,
+  });
+  const gearOf = (slug: string) => ({
+    position: null,
+    racketSlug: slug,
+    racketName: slug,
+    racketBrand: "BrandX",
+    racketImage: null,
+  });
+
+  it("earns One of a Kind when no one else uses your racket (in a real field)", () => {
+    const fieldRackets = [
+      { playerId: "self", brand: "BrandX", name: "Rare", slug: "rare" },
+      { playerId: "a", brand: "BrandX", name: "Common", slug: "common" },
+      { playerId: "b", brand: "BrandX", name: "Common", slug: "common" },
+      { playerId: "c", brand: "BrandX", name: "Common", slug: "common" },
+      { playerId: "d", brand: "BrandX", name: "Other", slug: "other" },
+    ];
+    const ctx = base({ gear: gearOf("rare"), fieldRackets });
+    const m = byKey(career(), [], ctx);
+    expect(m.get("one-of-a-kind")!.earned).toBe(true);
+    expect(m.get("crowd-favourite")!.earned).toBe(false);
+  });
+
+  it("earns Crowd Favourite on the league's most popular racket", () => {
+    const fieldRackets = [
+      { playerId: "self", brand: "BrandX", name: "Pop", slug: "pop" },
+      { playerId: "a", brand: "BrandX", name: "Pop", slug: "pop" },
+      { playerId: "b", brand: "BrandX", name: "Pop", slug: "pop" },
+      { playerId: "c", brand: "BrandX", name: "X", slug: "x" },
+      { playerId: "d", brand: "BrandX", name: "Y", slug: "y" },
+    ];
+    const ctx = base({ gear: gearOf("pop"), fieldRackets });
+    const m = byKey(career(), [], ctx);
+    expect(m.get("crowd-favourite")!.earned).toBe(true);
+    expect(m.get("one-of-a-kind")!.earned).toBe(false);
+  });
+
+  it("locks the rarity badges without a field to compare against", () => {
+    const m = byKey(career(), [], base({ gear: gearOf("rare") }));
+    expect(m.get("one-of-a-kind")!.earned).toBe(false);
+    expect(m.get("crowd-favourite")!.earned).toBe(false);
+  });
+
+  it("surfaces Power Frame only when the racket shape is known", () => {
+    const withShape = base({
+      gear: gearOf("d"),
+      fieldRackets: [{ playerId: "self", brand: "BrandX", name: "D", slug: "d", shape: "Diamond" }],
+    });
+    const m = byKey(career(), [], withShape);
+    expect(m.get("power-frame")!.earned).toBe(true);
+    expect(m.has("control-frame")).toBe(false);
+    // No shape metadata → the spec badge isn't emitted at all.
+    const noShape = base({
+      gear: gearOf("d"),
+      fieldRackets: [{ playerId: "self", brand: "BrandX", name: "D", slug: "d" }],
+    });
+    expect(byKey(career(), [], noShape).has("power-frame")).toBe(false);
+  });
+
+  it("earns Made for You when racket style matches play style", () => {
+    const fieldRackets = [{ playerId: "self", brand: "BrandX", name: "R", slug: "r", shape: "Round" }];
+    const match = base({ gear: gearOf("r"), fieldRackets, playStyle: "control" });
+    expect(byKey(career(), [], match).get("made-for-you")!.earned).toBe(true);
+    const mismatch = base({ gear: gearOf("r"), fieldRackets, playStyle: "power" });
+    expect(byKey(career(), [], mismatch).get("made-for-you")!.earned).toBe(false);
+  });
+
+  it("earns Big Spender for owning the priciest racket", () => {
+    const fieldRackets = [
+      { playerId: "self", brand: "BrandX", name: "Pricey", slug: "pricey", price: 320 },
+      { playerId: "a", brand: "BrandX", name: "Cheap", slug: "cheap", price: 180 },
+    ];
+    expect(byKey(career(), [], base({ gear: gearOf("pricey"), fieldRackets })).get("big-spender")!.earned).toBe(true);
+    const outspent = [
+      { playerId: "self", brand: "BrandX", name: "Mid", slug: "mid", price: 150 },
+      { playerId: "a", brand: "BrandX", name: "Top", slug: "top", price: 400 },
+    ];
+    expect(byKey(career(), [], base({ gear: gearOf("mid"), fieldRackets: outspent })).get("big-spender")!.earned).toBe(false);
+  });
+});
+
 describe("computeAchievements — more shame", () => {
   it("earns Blown Out on a 10+ point loss", () => {
     const a = byKey(career(), [match({ result: "L", points: 5, conceded: 21 })]).get("blown-out")!;

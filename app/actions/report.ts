@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import type { AchievementContext } from "@/lib/achievements";
 import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
-import { getPlayerGear, getPlayerMatchHistory } from "@/lib/queries";
+import { getPlayerGear, getPlayerMatchHistory, getPlayerRackets } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
+import { racketPlayStyle } from "@/lib/racket-reco";
 import {
   buildReportFacts,
   generatePlayerReport,
@@ -38,12 +39,19 @@ export async function getOrCreatePlayerReport(
   const player = board.find((p) => p.row.player_id === playerId);
   if (!player) return null;
 
-  const [matches, ratingField, results, gear] = await Promise.all([
+  const [matches, ratingField, results, gear, fieldRacketMap] = await Promise.all([
     getPlayerMatchHistory(playerId),
     getRatingField(),
     fetchRawResults(),
     getPlayerGear(playerId),
+    getPlayerRackets(),
   ]);
+  const fieldRackets = [...fieldRacketMap].map(([id, rk]) => ({
+    playerId: id,
+    brand: rk.brand,
+    name: rk.name,
+    slug: rk.slug,
+  }));
 
   const ratingHistory = buildRatingHistory(matches, ratingField, {
     id: player.row.player_id,
@@ -61,6 +69,8 @@ export async function getOrCreatePlayerReport(
     results,
     consistency: player.attributes.consistency,
     gear,
+    fieldRackets,
+    playStyle: racketPlayStyle(player.attributes),
   };
 
   const reportInput: ReportInput = { player, matches, context, gear };
