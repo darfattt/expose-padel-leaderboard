@@ -31,6 +31,29 @@ export interface Club {
   slug: string;
 }
 
+// On-court playing position.
+export type PlayerPosition = "Right" | "Left" | "Both";
+
+// A racket from the Padelful catalogue (https://docs.padelful.com/api/rackets),
+// trimmed to the fields we display and persist.
+export interface RacketOption {
+  slug: string;
+  name: string;
+  brand: string;
+  image: string | null; // absolute URL
+  shape: string | null;
+  rating: string | null;
+}
+
+// A player's editable gear/profile, as stored on the players row.
+export interface PlayerGear {
+  position: PlayerPosition | null;
+  racketSlug: string | null;
+  racketName: string | null;
+  racketBrand: string | null;
+  racketImage: string | null;
+}
+
 // Aggregate row from the player_career_stats view (raw, pre-rating).
 // When scoped to a club (player_club_stats) club_id is also present.
 export interface CareerStatRow {

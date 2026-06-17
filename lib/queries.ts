@@ -1,4 +1,5 @@
 import { createReadClient } from "./supabase/server";
+import type { PlayerGear, PlayerPosition } from "./types";
 
 export interface PlayerRow {
   id: string;
@@ -66,6 +67,36 @@ export async function getPlayer(id: string): Promise<PlayerRow | null> {
     return data as PlayerRow;
   } catch {
     return null;
+  }
+}
+
+// A player's editable gear/position. Returns empty fields when Supabase isn't
+// configured or the player has no row yet, so the editor renders an empty state.
+export async function getPlayerGear(id: string): Promise<PlayerGear> {
+  const empty: PlayerGear = {
+    position: null,
+    racketSlug: null,
+    racketName: null,
+    racketBrand: null,
+    racketImage: null,
+  };
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("players")
+      .select("position, racket_slug, racket_name, racket_brand, racket_image")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return {
+      position: (data.position as PlayerPosition | null) ?? null,
+      racketSlug: (data.racket_slug as string | null) ?? null,
+      racketName: (data.racket_name as string | null) ?? null,
+      racketBrand: (data.racket_brand as string | null) ?? null,
+      racketImage: (data.racket_image as string | null) ?? null,
+    };
+  } catch {
+    return empty;
   }
 }
 

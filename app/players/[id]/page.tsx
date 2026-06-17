@@ -4,13 +4,14 @@ import { notFound } from "next/navigation";
 import { computeAchievements } from "@/lib/achievements";
 import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
-import { getPlayer, getPlayerMatchHistory } from "@/lib/queries";
+import { getPlayer, getPlayerGear, getPlayerMatchHistory } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
 import { venueHook } from "@/lib/gossip";
 import { bestVenue, computeForm, partnerChemistry, rivalries } from "@/lib/relationships";
 import AchievementsCard from "./AchievementsCard";
 import AttributeRadar from "./AttributeRadar";
 import FormStrip from "./FormStrip";
+import GearCard from "./GearCard";
 import GossipCardAsync from "./GossipCardAsync";
 import GossipCardSkeleton from "./GossipCardSkeleton";
 import { GossipLine } from "./relationship-ui";
@@ -32,22 +33,25 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   if (!player) {
     const exists = await getPlayer(id);
     if (!exists) notFound();
-    // Player exists but has no games yet.
+    // Player exists but has no games yet — gear/position are still editable.
+    const gear = await getPlayerGear(id);
     return (
       <div>
         <BackLink />
         <h1 className="font-display text-[48px] tracking-tight mt-4">{exists.name}</h1>
-        <p className="text-body-muted mt-2">No games recorded yet.</p>
+        <p className="text-body-muted mt-2 mb-8">No games recorded yet.</p>
+        <GearCard playerId={id} initial={gear} />
       </div>
     );
   }
 
   // Only the fast DB read blocks the page. The LLM Player Report streams in
   // separately via the <Suspense> boundary below, so the page renders at once.
-  const [matches, ratingField, results] = await Promise.all([
+  const [matches, ratingField, results, gear] = await Promise.all([
     getPlayerMatchHistory(id),
     getRatingField(),
     fetchRawResults(),
+    getPlayerGear(id),
   ]);
   const r = player.row;
   const a = player.attributes;
@@ -100,11 +104,15 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             {level.badge} {level.category} · {level.description}
           </p>
         </div>
-        <div className="text-right">
-          <div className="font-display text-[64px] leading-none tracking-tightest">
-            {player.rating.toFixed(1)}
+        {/* Gear hero + rating share the right side; wrap together on mobile */}
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
+          <GearCard playerId={id} initial={gear} />
+          <div className="text-right">
+            <div className="font-display text-[64px] leading-none tracking-tightest">
+              {player.rating.toFixed(1)}
+            </div>
+            <div className="mono-label mt-1">Rating / 10</div>
           </div>
-          <div className="mono-label mt-1">Rating / 10</div>
         </div>
       </div>
 
