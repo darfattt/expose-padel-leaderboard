@@ -1,4 +1,5 @@
 import { type Archetype, type Attributes, type ArchetypeField, computeAttributes, pickArchetype } from "./archetype";
+import { applyDecay, inactivityDays } from "./decay";
 import { type PlayerMetrics, computeMetrics, fieldStats } from "./stats";
 import { type RatingField, computeRating, isProvisional } from "./rating";
 import {
@@ -6,6 +7,7 @@ import {
   type RawResult,
   aggregateResults,
   filterByMonth,
+  lastPlayedByPlayer,
   monthsFromResults,
   resultsBeforeLatest,
   withRankChange,
@@ -19,10 +21,20 @@ export interface RankedPlayer {
   rank: number | null; // null while provisional (below the min-games threshold)
   row: CareerStatRow;
   metrics: PlayerMetrics;
-  rating: number;
+  rating: number; // the live, decayed rating used for ranking/display
+  baseRating: number; // skill rating before inactivity decay (== rating when fresh)
+  ratingPenalty: number; // points shaved off by inactivity rust (0 when fresh)
+  daysInactive: number | null; // days since last game (null when undated/unknown)
   attributes: Attributes;
   archetype: Archetype;
   provisional: boolean;
+}
+
+// Inactivity context for the rust overlay (see lib/decay.ts). When omitted,
+// rankPlayers leaves ratings untouched (baseRating === rating, no penalty).
+export interface DecayInput {
+  lastPlayedById: Map<string, string>; // player id → most-recent yyyy-mm-dd played
+  asOf: string; // reference date the inactivity is measured against
 }
 
 // Pull career stats for the whole field. When clubId is given, stats are scoped
@@ -65,7 +77,7 @@ function buildArchetypeField(metrics: PlayerMetrics[]): ArchetypeField {
 // contribute to the field normalization (and appear in the result). Ranked
 // players (>= MIN_GAMES_RANKED) sort by rating desc and get a rank number;
 // provisional players sort after them and carry rank = null.
-export function rankPlayers(rows: CareerStatRow[]): RankedPlayer[] {
+export function rankPlayers(rows: CareerStatRow[], decay?: DecayInput): RankedPlayer[] {
   const played = rows.filter((r) => r.games > 0);
   const metrics = played.map(computeMetrics);
   const ratingField = buildRatingField(metrics);
@@ -73,10 +85,18 @@ export function rankPlayers(rows: CareerStatRow[]): RankedPlayer[] {
 
   const enriched = played.map((row, i): Omit<RankedPlayer, "rank"> => {
     const m = metrics[i];
+    const baseRating = computeRating(m, ratingField, { score: row.point_diff, wins: row.wins });
+    const daysInactive = decay
+      ? inactivityDays(decay.lastPlayedById.get(row.player_id) ?? null, decay.asOf)
+      : null;
+    const rating = decay ? applyDecay(baseRating, daysInactive) : baseRating;
     return {
       row,
       metrics: m,
-      rating: computeRating(m, ratingField, { score: row.point_diff, wins: row.wins }),
+      rating,
+      baseRating,
+      ratingPenalty: Math.round((baseRating - rating) * 10) / 10,
+      daysInactive,
       attributes: computeAttributes(m, archetypeField),
       archetype: pickArchetype(m, archetypeField),
       provisional: isProvisional(row.games),
@@ -97,9 +117,45 @@ export function rankPlayers(rows: CareerStatRow[]): RankedPlayer[] {
   }));
 }
 
-// clubId scopes the board to a single club; omit it for the global board.
+// Today as a yyyy-mm-dd string — the reference date for inactivity decay. The
+// clock lives in the orchestrators so rankPlayers itself stays pure/testable.
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Most-recent dated game per player, for the inactivity (rust) overlay. Scoped to
+// a club when clubId is given. Returns an empty map when Supabase isn't configured.
+export async function fetchLastPlayed(clubId?: string): Promise<Map<string, string>> {
+  const byPlayer = new Map<string, string>();
+  try {
+    const supabase = createReadClient();
+    let query = supabase
+      .from("match_players")
+      .select("player_id, matches!inner(events!inner(played_on, club_id))");
+    if (clubId) query = query.eq("matches.events.club_id", clubId);
+    const { data, error } = await query;
+    if (error) throw error;
+    for (const r of data ?? []) {
+      const match = Array.isArray(r.matches) ? r.matches[0] : r.matches;
+      const ev = Array.isArray(match.events) ? match.events[0] : match.events;
+      const playedOn = (ev as { played_on: string | null })?.played_on ?? null;
+      if (!playedOn) continue;
+      const id = r.player_id as string;
+      const prev = byPlayer.get(id);
+      if (!prev || playedOn > prev) byPlayer.set(id, playedOn);
+    }
+    return byPlayer;
+  } catch {
+    return byPlayer;
+  }
+}
+
+// clubId scopes the board to a single club; omit it for the global board. The
+// board carries the inactivity (rust) overlay so a player's number is consistent
+// everywhere it appears (profile, scatter, versus, …).
 export async function getLeaderboard(clubId?: string): Promise<RankedPlayer[]> {
-  return rankPlayers(await fetchCareerStats(clubId));
+  const [rows, lastPlayedById] = await Promise.all([fetchCareerStats(clubId), fetchLastPlayed(clubId)]);
+  return rankPlayers(rows, { lastPlayedById, asOf: today() });
 }
 
 // The field normalization used by computeRating, built from the whole field.
@@ -169,12 +225,14 @@ export async function getLeaderboardView(clubId?: string, period?: string): Prom
   const resolved = period && months.includes(period) ? period : "all";
 
   if (resolved !== "all") {
+    // A month is a standalone board, not a continuation — no rust overlay.
     const current = rankPlayers(aggregateResults(filterByMonth(results, resolved)));
     return { board: withRankChange(current, null), months, period: resolved };
   }
 
-  const current = rankPlayers(aggregateResults(results));
+  const decay: DecayInput = { lastPlayedById: lastPlayedByPlayer(results), asOf: today() };
+  const current = rankPlayers(aggregateResults(results), decay);
   const before = resultsBeforeLatest(results);
-  const previous = before === null ? null : rankPlayers(aggregateResults(before));
+  const previous = before === null ? null : rankPlayers(aggregateResults(before), decay);
   return { board: withRankChange(current, previous), months, period: "all" };
 }

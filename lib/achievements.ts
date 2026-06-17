@@ -73,6 +73,29 @@ export const WEEKLY_HABIT_WEEKS = 8; // distinct calendar weeks with a game play
 export const GEAR_MIN_FIELD = 5; // players-with-rackets before rare/popular counts
 export const GEAR_COMMON_MIN = 3; // users sharing the most popular racket to call it "common"
 
+// --- Shame mirrors of the "good" badges -----------------------------------
+// Each of these is the dark twin of a positive badge above and reuses the same
+// data/helpers, so the badge wall reads as deliberately symmetric.
+// Bridesmaid: finish runner-up (exactly one player out-scored you) this many
+// times — the near-miss mirror of Event Champion.
+export const BRIDESMAID_TARGET = 3;
+// Sieve: concede this many career points — the leaky mirror of Point Machine.
+export const SIEVE_TARGET = POINTS_TARGET;
+// Glass Cannon: score freely yet still run a negative differential. A high
+// points-for with a losing net diff — all offence, no defence.
+export const GLASS_CANNON_MIN_POINTS = 500;
+// Jekyll & Hyde: a low Consistency attribute held over a meaningful sample — the
+// anti-Mr. Reliable. (Consistency is field-relative, 0–100; see archetype.ts.)
+export const JEKYLL_CONSISTENCY = 35;
+// Punching Bag: lose to one opponent this many times (mirror of Domination).
+export const PUNCHING_BAG_LOSSES = DOMINATION_WINS;
+// Stuck Together: lose this many games alongside one partner (mirror of Dynamic Duo).
+export const STUCK_TOGETHER_LOSSES = DYNAMIC_DUO_WINS;
+// Flat-Track Bully: enough career wins to be established, yet never once beaten an
+// opponent rated above you — every scalp came from at/below your level. The inverse
+// of David.
+export const FLAT_TRACK_MIN_WINS = 15;
+
 // Named "easter-egg" rivals — these badges are about specific people in the
 // league. Matched by normalized name, so they no-op in leagues without them.
 export const NAMED_NEMESIS = "Adhitia putra herawan"; // beat them in a match
@@ -199,6 +222,19 @@ function hasDavidWin(matches: MatchHistoryEntry[], ctx: AchievementContext): boo
   });
 }
 
+// Whether the player has ever beaten an opponent rated above them (any margin).
+// The negation drives Flat-Track Bully.
+function hasWinOverHigherRated(matches: MatchHistoryEntry[], ctx: AchievementContext): boolean {
+  return matches.some(
+    (m) =>
+      m.result === "W" &&
+      m.opponentIds.some((id) => {
+        const r = ctx.ratingById.get(id);
+        return r !== undefined && r > ctx.selfRating;
+      })
+  );
+}
+
 // Won a match where a named player was on the opposing side.
 function beatNamedOpponent(matches: MatchHistoryEntry[], name: string): boolean {
   const target = nameKey(name);
@@ -219,6 +255,16 @@ function ratingSteadyClimb(history?: number[]): boolean {
     if (history[i] < history[i - 1]) return false;
   }
   return history[history.length - 1] > history[0];
+}
+
+// Rating never rose event-to-event and ended lower than it started, over a
+// meaningful number of events — the mirror of ratingSteadyClimb.
+function ratingSteadyDrop(history?: number[]): boolean {
+  if (!history || history.length < CLIMB_MIN_EVENTS) return false;
+  for (let i = 1; i < history.length; i++) {
+    if (history[i] > history[i - 1]) return false;
+  }
+  return history[history.length - 1] < history[0];
 }
 
 // Games sorted oldest → newest (dated first, then by round/court). Undated games
@@ -296,6 +342,14 @@ function isBigMover(history?: number[]): boolean {
   return history[history.length - 1] - history[0] >= BIG_MOVER_GAIN;
 }
 
+// Rating fell BIG_MOVER_GAIN+ from its peak to the latest event — the slide
+// mirror of Big Mover.
+function isBigFaller(history?: number[]): boolean {
+  if (!history || history.length < 2) return false;
+  const peak = Math.max(...history);
+  return peak - history[history.length - 1] >= BIG_MOVER_GAIN;
+}
+
 // Finished bottom on points in an event with enough players for "last" to mean
 // something (no one scored fewer than the player; ties at the bottom count).
 function hasWoodenSpoon(ctx: AchievementContext): boolean {
@@ -351,6 +405,33 @@ function hasEventWin(ctx: AchievementContext): boolean {
     if (top) return true;
   }
   return false;
+}
+
+// How many events the player finished as runner-up: exactly one other player
+// out-scored them on total points, in an event big enough for placing to mean
+// something. The near-miss mirror of hasEventWin (which needs zero above you).
+function runnerUpCount(ctx: AchievementContext): number {
+  if (!ctx.results || !ctx.selfId) return 0;
+  const byEvent = new Map<string, Map<string, number>>();
+  for (const r of ctx.results) {
+    let totals = byEvent.get(r.eventId);
+    if (!totals) {
+      totals = new Map();
+      byEvent.set(r.eventId, totals);
+    }
+    totals.set(r.playerId, (totals.get(r.playerId) ?? 0) + r.points);
+  }
+  let count = 0;
+  for (const totals of byEvent.values()) {
+    const mine = totals.get(ctx.selfId);
+    if (mine === undefined || totals.size < EVENT_CHAMPION_MIN_PLAYERS) continue;
+    let above = 0;
+    for (const [pid, pts] of totals) {
+      if (pid !== ctx.selfId && pts > mine) above += 1;
+    }
+    if (above === 1) count += 1;
+  }
+  return count;
 }
 
 // The day-number (days since the Unix epoch, UTC) of a yyyy-mm-dd date, or null
@@ -662,6 +743,81 @@ export function computeAchievements(
     countBadge("heartbreaker", "💔", "Heartbreaker", "Lose 5 close games (≤3 pts).", closeLosses(matches), HEARTBREAK_TARGET, "bad"),
     countBadge("cold-streak", "🧊", "Cold Streak", "Lose 5 games in a row.", longestResultStreak(matches, "L"), LOSS_STREAK_TARGET, "bad"),
     binary("wooden-spoon", "🥄", "Wooden Spoon", "Finish last in an event.", ctx ? hasWoodenSpoon(ctx) : false, "bad"),
+    // --- Shame mirrors of the good badges (same data, dark twin) -----------
+    countBadge(
+      "bridesmaid",
+      "🥈",
+      "Bridesmaid",
+      `Finish runner-up in ${BRIDESMAID_TARGET} events.`,
+      ctx ? runnerUpCount(ctx) : 0,
+      BRIDESMAID_TARGET,
+      "bad"
+    ),
+    countBadge(
+      "sieve",
+      "🧽",
+      "Sieve",
+      `Concede ${SIEVE_TARGET} career points.`,
+      row.points_against,
+      SIEVE_TARGET,
+      "bad"
+    ),
+    binary(
+      "glass-cannon",
+      "🩸",
+      "Glass Cannon",
+      `Score ${GLASS_CANNON_MIN_POINTS}+ points but still finish in the red.`,
+      row.points_for >= GLASS_CANNON_MIN_POINTS && row.point_diff < 0,
+      "bad"
+    ),
+    binary(
+      "jekyll-and-hyde",
+      "🎭",
+      "Jekyll & Hyde",
+      `Stay wildly inconsistent over ${MR_RELIABLE_MIN_GAMES}+ games.`,
+      ctx?.consistency != null && ctx.consistency <= JEKYLL_CONSISTENCY && row.games >= MR_RELIABLE_MIN_GAMES,
+      "bad"
+    ),
+    binary(
+      "punching-bag",
+      "🥊",
+      "Punching Bag",
+      `Lose to the same opponent ${PUNCHING_BAG_LOSSES} times.`,
+      opponents.some((o) => o.losses >= PUNCHING_BAG_LOSSES),
+      "bad"
+    ),
+    binary(
+      "stuck-together",
+      "🔗",
+      "Stuck Together",
+      `Lose ${STUCK_TOGETHER_LOSSES} games alongside one partner.`,
+      partners.some((p) => p.losses >= STUCK_TOGETHER_LOSSES),
+      "bad"
+    ),
+    binary(
+      "free-fall",
+      "📉",
+      "Free Fall",
+      `Drop your rating every event across ${CLIMB_MIN_EVENTS}+ events.`,
+      ratingSteadyDrop(ctx?.ratingHistory),
+      "bad"
+    ),
+    binary(
+      "slipping",
+      "🪂",
+      "Slipping",
+      `Slide ${BIG_MOVER_GAIN.toFixed(1)}+ rating from your peak.`,
+      isBigFaller(ctx?.ratingHistory),
+      "bad"
+    ),
+    binary(
+      "flat-track-bully",
+      "🃏",
+      "Flat-Track Bully",
+      `Win ${FLAT_TRACK_MIN_WINS}+ games but never beat anyone rated above you.`,
+      ctx ? row.wins >= FLAT_TRACK_MIN_WINS && !hasWinOverHigherRated(matches, ctx) : false,
+      "bad"
+    ),
   ];
 
   // Spec-based gear badges — only surfaced when the racket catalogue metadata

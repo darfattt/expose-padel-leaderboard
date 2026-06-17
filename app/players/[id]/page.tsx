@@ -125,18 +125,27 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
               {player.rating.toFixed(1)}
             </div>
             <div className="mono-label mt-1">Rating / 7</div>
+            {player.ratingPenalty > 0 ? (
+              <div
+                className="mono-label mt-1 text-coral"
+                title={`Skill rating ${player.baseRating.toFixed(1)}, docked ${player.ratingPenalty.toFixed(1)} for ${player.daysInactive ?? "?"} days off the court. Play to knock the rust off.`}
+              >
+                💤 −{player.ratingPenalty.toFixed(1)} rust
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
 
-      {/* Reliability gate: shown only while it actively caps the rating */}
-      <ReliabilityGate score={r.point_diff} wins={r.wins} rating={player.rating} />
+      {/* Reliability gate: shown only while it actively caps the *skill* rating
+          (the pre-rust base), so inactivity rust never masks an earned gate. */}
+      <ReliabilityGate score={r.point_diff} wins={r.wins} rating={player.baseRating} />
 
       {/* Recent form + gossip hooks (deterministic one-liner + LLM column) */}
       {form.recent.length > 0 || venueGossip ? (
         <div className="mb-4 space-y-3">
           {form.recent.length > 0 ? <FormStrip form={form} /> : null}
-          {/* <GossipLine>{venueGossip}</GossipLine> */}
+          <GossipLine>{venueGossip}</GossipLine>
         </div>
       ) : null}
       <div className="mb-10">

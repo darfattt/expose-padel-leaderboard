@@ -80,6 +80,19 @@ export function filterByMonth(results: RawResult[], month: string): RawResult[] 
   return results.filter((r) => r.playedOn?.slice(0, 7) === month);
 }
 
+// The most-recent dated game per player — the input to the inactivity (rust)
+// overlay (see lib/decay.ts). Undated games are ignored; players with only undated
+// games are omitted (treated as fresh downstream).
+export function lastPlayedByPlayer(results: RawResult[]): Map<string, string> {
+  const byPlayer = new Map<string, string>();
+  for (const r of results) {
+    if (!r.playedOn) continue;
+    const prev = byPlayer.get(r.playerId);
+    if (!prev || r.playedOn > prev) byPlayer.set(r.playerId, r.playedOn);
+  }
+  return byPlayer;
+}
+
 // The most recent event in the set, by date (undated events never count as
 // "latest"). Returns null when fewer than two distinct events exist — there's
 // nothing to measure movement against.

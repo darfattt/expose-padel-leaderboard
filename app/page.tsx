@@ -122,6 +122,7 @@ function Board({
             <span className="font-display text-lg tracking-tight">{p.row.name}</span>
             <span className="text-right font-mono text-lg tabular-nums">
               {p.rating.toFixed(1)}
+              <RustMark penalty={p.ratingPenalty} days={p.daysInactive} />
             </span>
             <span>
               <LevelBadge level={level} />
@@ -177,6 +178,18 @@ function RankChange({ delta, isNew }: { delta: number | null; isNew: boolean }) 
     >
       <span aria-hidden>{up ? "▲" : "▼"}</span>
       {Math.abs(delta)}
+    </span>
+  );
+}
+
+// A small "rust" marker shown when a player's rating has been docked for
+// inactivity (see lib/decay.ts). Hidden for fresh players.
+function RustMark({ penalty, days }: { penalty: number; days: number | null }) {
+  if (!penalty) return null;
+  const title = `Rusty: −${penalty.toFixed(1)} for ${days ?? "?"} days off the court`;
+  return (
+    <span className="ml-1 align-middle text-xs text-coral" title={title} aria-label={title}>
+      💤
     </span>
   );
 }

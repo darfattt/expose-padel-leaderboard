@@ -573,6 +573,107 @@ describe("computeAchievements — more shame", () => {
   });
 });
 
+describe("computeAchievements — shame mirrors", () => {
+  const ctx = (over: Partial<AchievementContext>): AchievementContext => ({
+    rank: null,
+    topRankIds: new Set(),
+    ratingById: new Map(),
+    selfRating: 5,
+    selfId: "self",
+    ...over,
+  });
+
+  it("earns Sieve for conceding 1000 career points and tracks progress", () => {
+    const a = byKey(career({ points_against: 1000 }), []).get("sieve")!;
+    expect(a.earned).toBe(true);
+    expect(a.tone).toBe("bad");
+    expect(byKey(career({ points_against: 250 }), []).get("sieve")!.progress).toEqual({ current: 250, target: 1000 });
+  });
+
+  it("earns Glass Cannon for scoring big but finishing in the red", () => {
+    expect(byKey(career({ points_for: 600, point_diff: -40 }), []).get("glass-cannon")!.earned).toBe(true);
+    // High scoring but a positive diff is no shame.
+    expect(byKey(career({ points_for: 600, point_diff: 40 }), []).get("glass-cannon")!.earned).toBe(false);
+    // Negative diff but low volume doesn't qualify.
+    expect(byKey(career({ points_for: 200, point_diff: -40 }), []).get("glass-cannon")!.earned).toBe(false);
+  });
+
+  it("earns Jekyll & Hyde for low consistency over enough games", () => {
+    expect(byKey(career({ games: 12 }), [], ctx({ consistency: 30 })).get("jekyll-and-hyde")!.earned).toBe(true);
+    // Consistent enough → safe.
+    expect(byKey(career({ games: 12 }), [], ctx({ consistency: 60 })).get("jekyll-and-hyde")!.earned).toBe(false);
+    // Too few games to judge.
+    expect(byKey(career({ games: 5 }), [], ctx({ consistency: 10 })).get("jekyll-and-hyde")!.earned).toBe(false);
+    // No context → unearned.
+    expect(byKey(career({ games: 12 }), []).get("jekyll-and-hyde")!.earned).toBe(false);
+  });
+
+  it("earns Punching Bag for losing 5 times to one opponent", () => {
+    const games = Array.from({ length: 5 }, () => match({ result: "L", opponentIds: ["o"], opponents: ["O"] }));
+    expect(byKey(career(), games).get("punching-bag")!.earned).toBe(true);
+    const split = [
+      ...Array.from({ length: 4 }, () => match({ result: "L", opponentIds: ["o"], opponents: ["O"] })),
+      match({ result: "W", opponentIds: ["o"], opponents: ["O"] }),
+    ];
+    expect(byKey(career(), split).get("punching-bag")!.earned).toBe(false);
+  });
+
+  it("earns Stuck Together for losing 5 games with one partner", () => {
+    const games = Array.from({ length: 5 }, () => match({ result: "L", partnerId: "p", partner: "P" }));
+    expect(byKey(career(), games).get("stuck-together")!.earned).toBe(true);
+  });
+
+  it("earns Free Fall when the rating only ever drops over 3+ events", () => {
+    expect(byKey(career(), [], ctx({ ratingHistory: [5.0, 4.5, 4.0] })).get("free-fall")!.earned).toBe(true);
+    // A flat-then-down still counts (non-increasing, net loss).
+    expect(byKey(career(), [], ctx({ ratingHistory: [5.0, 5.0, 4.0] })).get("free-fall")!.earned).toBe(true);
+    // Any uptick breaks it.
+    expect(byKey(career(), [], ctx({ ratingHistory: [5.0, 4.0, 4.5] })).get("free-fall")!.earned).toBe(false);
+    // Needs 3+ events.
+    expect(byKey(career(), [], ctx({ ratingHistory: [5.0, 4.0] })).get("free-fall")!.earned).toBe(false);
+  });
+
+  it("earns Slipping on a 1.0+ fall from the peak", () => {
+    expect(byKey(career(), [], ctx({ ratingHistory: [4.0, 5.5, 4.4] })).get("slipping")!.earned).toBe(true);
+    expect(byKey(career(), [], ctx({ ratingHistory: [4.0, 4.5, 4.2] })).get("slipping")!.earned).toBe(false);
+  });
+
+  it("earns Flat-Track Bully for many wins but never an upset", () => {
+    const ratingById = new Map([
+      ["self", 5.0],
+      ["low", 3.0],
+      ["high", 6.5],
+    ]);
+    const onlyLow = Array.from({ length: 15 }, () =>
+      match({ result: "W", opponentIds: ["low"], opponents: ["Low"] })
+    );
+    expect(byKey(career({ wins: 15 }), onlyLow, ctx({ ratingById })).get("flat-track-bully")!.earned).toBe(true);
+    // One scalp above your level clears the shame.
+    const withUpset = [...onlyLow, match({ result: "W", opponentIds: ["high"], opponents: ["High"] })];
+    expect(byKey(career({ wins: 16 }), withUpset, ctx({ ratingById })).get("flat-track-bully")!.earned).toBe(false);
+    // Too few wins to be "established".
+    expect(byKey(career({ wins: 5 }), onlyLow.slice(0, 5), ctx({ ratingById })).get("flat-track-bully")!.earned).toBe(false);
+  });
+
+  it("earns Bridesmaid for finishing runner-up enough times", () => {
+    const runnerUpEvent = (eventId: string) => [
+      { playerId: "self", name: "Self", points: 20, conceded: 10, won: true, isDraw: false, eventId, playedOn: "2024-01-01" },
+      { playerId: "win", name: "Win", points: 30, conceded: 5, won: true, isDraw: false, eventId, playedOn: "2024-01-01" },
+      { playerId: "c", name: "C", points: 12, conceded: 18, won: false, isDraw: false, eventId, playedOn: "2024-01-01" },
+      { playerId: "d", name: "D", points: 8, conceded: 22, won: false, isDraw: false, eventId, playedOn: "2024-01-01" },
+    ];
+    const results = [...runnerUpEvent("e1"), ...runnerUpEvent("e2"), ...runnerUpEvent("e3")];
+    const a = byKey(career(), [], ctx({ results })).get("bridesmaid")!;
+    expect(a.earned).toBe(true);
+    expect(a.progress).toEqual({ current: 3, target: 3 });
+    // Winning the event is not a runner-up finish.
+    const wonOne = results.map((r) =>
+      r.eventId === "e1" && r.playerId === "self" ? { ...r, points: 99 } : r
+    );
+    expect(byKey(career(), [], ctx({ results: wonOne })).get("bridesmaid")!.progress).toEqual({ current: 2, target: 3 });
+  });
+});
+
 describe("computeAchievements — On the Up", () => {
   const ctx = (ratingHistory: number[]): AchievementContext => ({
     rank: null,
