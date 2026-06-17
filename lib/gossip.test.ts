@@ -1,9 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { h2hHook, partnerHook, rivalryHook, venueHook } from "./gossip";
+import {
+  buildGossipFacts,
+  h2hHook,
+  hasGossipMaterial,
+  partnerHook,
+  rivalryHook,
+  venueHook,
+} from "./gossip";
+import type { MatchHistoryEntry } from "./queries";
 import type { PairRecord, PartnerChemistry, Rivalries } from "./relationships";
 
 function rec(p: Partial<PairRecord> & { id: string; name: string }): PairRecord {
   return { games: 0, wins: 0, losses: 0, draws: 0, winRate: 0, pointDiff: 0, ...p };
+}
+
+function match(p: Partial<MatchHistoryEntry>): MatchHistoryEntry {
+  return {
+    matchId: "m",
+    eventId: "e",
+    eventTitle: "Event",
+    location: null,
+    playedOn: null,
+    round: 1,
+    court: 1,
+    partner: null,
+    partnerId: null,
+    opponents: [],
+    opponentIds: [],
+    points: 0,
+    conceded: 0,
+    result: "W",
+    ...p,
+  };
 }
 
 describe("partnerHook", () => {
@@ -54,5 +82,35 @@ describe("h2hHook", () => {
     expect(h2hHook("Me", "Opp", r(3, 1))).toContain("owns this rivalry");
     expect(h2hHook("Me", "Opp", r(1, 3))).toContain("upper hand");
     expect(h2hHook("Me", "Opp", r(2, 2))).toContain("Dead even");
+  });
+});
+
+describe("hasGossipMaterial / buildGossipFacts", () => {
+  // Three games with one fixed partner at one venue: enough to surface a best
+  // partner and a happy hunting ground.
+  const matches = [1, 2, 3].map((n) =>
+    match({
+      matchId: `m${n}`,
+      round: n,
+      location: "Court A",
+      partner: "Ann",
+      partnerId: "ann",
+      opponents: ["Bob"],
+      opponentIds: ["bob"],
+      points: 6,
+      conceded: 2,
+      result: "W",
+    })
+  );
+
+  it("is false with no games and true with relational signal", () => {
+    expect(hasGossipMaterial([])).toBe(false);
+    expect(hasGossipMaterial(matches)).toBe(true);
+  });
+
+  it("builds a grounded fact sheet naming the real partner and venue", () => {
+    const facts = buildGossipFacts(matches);
+    expect(facts).toContain("Ann");
+    expect(facts).toContain("Court A");
   });
 });

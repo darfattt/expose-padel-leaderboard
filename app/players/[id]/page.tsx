@@ -1,14 +1,18 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRankedPlayer, getRatingField } from "@/lib/leaderboard";
+import { computeAchievements } from "@/lib/achievements";
+import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerMatchHistory } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
 import { venueHook } from "@/lib/gossip";
 import { bestVenue, computeForm, partnerChemistry, rivalries } from "@/lib/relationships";
+import AchievementsCard from "./AchievementsCard";
 import AttributeRadar from "./AttributeRadar";
 import FormStrip from "./FormStrip";
+import GossipCardAsync from "./GossipCardAsync";
+import GossipCardSkeleton from "./GossipCardSkeleton";
 import { GossipLine } from "./relationship-ui";
 import PartnerChemistryCard from "./PartnerChemistryCard";
 import RatingHistoryChart from "./RatingHistoryChart";
@@ -20,7 +24,10 @@ export const dynamic = "force-dynamic";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const player = await getRankedPlayer(id);
+  // One leaderboard build gives both this player's enriched entry and the field
+  // context (ratings + current top 3) the achievements need.
+  const board = await getLeaderboard();
+  const player = board.find((p) => p.row.player_id === id) ?? null;
 
   if (!player) {
     const exists = await getPlayer(id);
@@ -37,9 +44,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
   // Only the fast DB read blocks the page. The LLM Player Report streams in
   // separately via the <Suspense> boundary below, so the page renders at once.
-  const [matches, ratingField] = await Promise.all([
+  const [matches, ratingField, results] = await Promise.all([
     getPlayerMatchHistory(id),
     getRatingField(),
+    fetchRawResults(),
   ]);
   const r = player.row;
   const a = player.attributes;
@@ -49,6 +57,16 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   const chemistry = partnerChemistry(matches);
   const rivalry = rivalries(matches);
   const venueGossip = venueHook(bestVenue(matches));
+  const achievements = computeAchievements(r, matches, {
+    rank: player.rank,
+    topRankIds: new Set(board.filter((p) => p.rank !== null && p.rank <= 3).map((p) => p.row.player_id)),
+    ratingById: new Map(board.map((p) => [p.row.player_id, p.rating])),
+    selfRating: player.rating,
+    ratingHistory: ratingHistory.map((h) => h.rating),
+    selfId: r.player_id,
+    results,
+    consistency: player.attributes.consistency,
+  });
 
   return (
     <div>
@@ -90,13 +108,18 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
 
-      {/* Recent form + a gossip hook */}
+      {/* Recent form + gossip hooks (deterministic one-liner + LLM column) */}
       {form.recent.length > 0 || venueGossip ? (
-        <div className="mb-10 space-y-3">
+        <div className="mb-4 space-y-3">
           {form.recent.length > 0 ? <FormStrip form={form} /> : null}
-          <GossipLine>{venueGossip}</GossipLine>
+          {/* <GossipLine>{venueGossip}</GossipLine> */}
         </div>
       ) : null}
+      <div className="mb-10">
+        <Suspense fallback={<GossipCardSkeleton />}>
+          <GossipCardAsync playerId={id} />
+        </Suspense>
+      </div>
 
       {/* Radar + report */}
       <div className="grid md:grid-cols-2 gap-6 mb-10">
@@ -152,6 +175,11 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       <div className="grid md:grid-cols-2 gap-6 mb-12">
         <PartnerChemistryCard chemistry={chemistry} />
         <RivalriesCard playerId={id} rivalries={rivalry} />
+      </div>
+
+      {/* Achievements */}
+      <div className="mb-12">
+        <AchievementsCard achievements={achievements} />
       </div>
 
       {/* Match history */}

@@ -1,13 +1,29 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getEvent, getEventResults } from "@/lib/queries";
+import { computeEventAwards } from "@/lib/awards";
+import { fetchCareerStats, getLeaderboard } from "@/lib/leaderboard";
+import { getEvent, getEventPlayerResults, getEventResults } from "@/lib/queries";
+import EventAwards from "./EventAwards";
 
 export const dynamic = "force-dynamic";
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [event, matches] = await Promise.all([getEvent(id), getEventResults(id)]);
+  const [event, matches, playerResults, board, career] = await Promise.all([
+    getEvent(id),
+    getEventResults(id),
+    getEventPlayerResults(id),
+    getLeaderboard(),
+    fetchCareerStats(),
+  ]);
   if (!event) notFound();
+
+  // Awards need cross-event context: the global rating field (Biggest Upset) and
+  // career stats (Most Improved). Both are derived read-time like the leaderboard.
+  const awards = computeEventAwards(playerResults, {
+    ratingById: new Map(board.map((p) => [p.row.player_id, p.rating])),
+    careerById: new Map(career.map((c) => [c.player_id, c])),
+  });
 
   // Group by round for a court-by-court layout.
   const rounds = new Map<number, typeof matches>();
@@ -47,6 +63,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           )}
         </div>
       </div>
+
+      <EventAwards awards={awards} />
 
       <div className="space-y-8">
         {roundNums.map((rn) => (

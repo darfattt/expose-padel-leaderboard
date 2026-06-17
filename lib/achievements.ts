@@ -1,0 +1,431 @@
+import { levelForRating } from "./levels";
+import type { MatchHistoryEntry } from "./queries";
+import { computeForm, opponentRecords, partnerChemistry, venueRecords } from "./relationships";
+import type { RawResult } from "./standings";
+import type { CareerStatRow } from "./types";
+
+// Career achievements / badges — lightweight gamification derived purely from a
+// player's facts (career row + match history), with optional leaderboard context
+// for the field-relative ones (giant killer, David, podium). Read-time only,
+// like the rest of lib/; nothing is persisted.
+
+// How far ahead an opponent must be rated for a win to count as a "David" upset.
+export const DAVID_RATING_GAP = 2.0;
+// Games needed in a single event before sweeping it counts as a clean sheet.
+export const SWEEP_MIN_GAMES = 3;
+// Margin of victory that counts as a blowout (Sharpshooter / Blown Out).
+export const BLOWOUT_MARGIN = 10;
+// Scoring fewer than this in a game earns the "Off Day" badge of shame.
+export const LOW_SCORE = 5;
+// Events needed before a never-dropping rating counts as a steady climb.
+export const CLIMB_MIN_EVENTS = 3;
+// Career-win milestone thresholds.
+export const WIN_BRONZE = 25;
+export const WIN_GOLD = 50;
+export const WIN_LEGEND = 100;
+// Career-points milestone thresholds.
+export const POINTS_TARGET = 1000;
+export const POINTS_TYCOON = 5000;
+// High Roller: win rate over a meaningful sample.
+export const HIGH_WIN_RATE = 0.7;
+export const HIGH_WIN_RATE_MIN_GAMES = 20;
+// Mr. Reliable: a high Consistency attribute (field-relative, 0–100) held over a
+// meaningful number of games.
+export const MR_RELIABLE_CONSISTENCY = 70;
+export const MR_RELIABLE_MIN_GAMES = 10;
+// Rating gained between first and latest event for Big Mover.
+export const BIG_MOVER_GAIN = 1.5;
+// Level bands (lib/levels.ts) that count as "reached Advanced".
+const ADVANCED_LEVELS = new Set(["advanced", "expert", "professional"]);
+// Social / partnership thresholds.
+export const DYNAMIC_DUO_WINS = 5; // wins with one partner
+export const SOCIAL_BUTTERFLY_PARTNERS = 10; // distinct partners
+export const GLOBETROTTER_VENUES = 3; // distinct venues
+export const DOMINATION_WINS = 5; // wins over one opponent
+// Shame thresholds.
+export const HEARTBREAK_TARGET = 5; // close games lost
+export const LOSS_STREAK_TARGET = 5; // consecutive losses (Cold Streak)
+export const WOODEN_SPOON_MIN_PLAYERS = 4; // event size before "last" is meaningful
+// Story thresholds.
+export const COMEBACK_GAP_DAYS = 60; // absence before a return counts as a comeback
+export const MARATHON_GAMES = 8; // games in a single event
+
+// Named "easter-egg" rivals — these badges are about specific people in the
+// league. Matched by normalized name, so they no-op in leagues without them.
+export const NAMED_NEMESIS = "Adhitia putra herawan"; // beat them in a match
+export const NAMED_RANK_RIVAL = "Bang Econ"; // finish an event above them
+
+// Local name key (mirrors normalizeName in lib/normalize.ts without pulling its
+// node:crypto import in). Lowercased, trimmed, inner whitespace collapsed.
+function nameKey(name: string): string {
+  return name.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+export interface Achievement {
+  key: string;
+  name: string;
+  badge: string; // emoji
+  description: string;
+  earned: boolean;
+  tone: "good" | "bad"; // "bad" = a badge of shame, tinted differently
+  // Present for count-based badges so the UI can show a progress bar. Omitted
+  // for one-off (binary) badges. current is clamped to target.
+  progress?: { current: number; target: number };
+}
+
+// Field-relative context, sourced from the global leaderboard. Optional: the
+// achievements that need it are simply reported unearned when it's absent.
+export interface AchievementContext {
+  rank: number | null; // the player's current rank (null = provisional)
+  topRankIds: Set<string>; // current top-3 player ids (Giant Killer target)
+  ratingById: Map<string, number>; // rating per player (David comparison)
+  selfRating: number;
+  // Rating after each event, oldest first (for the steady-climb badge).
+  ratingHistory?: number[];
+  // The player's own id and every raw result in the field, so per-event
+  // standings against a named rival can be reconstructed (Bang Econ badge).
+  selfId?: string;
+  results?: RawResult[];
+  // The player's Consistency attribute (0–100, field-relative; see archetype.ts)
+  // for the Mr. Reliable badge.
+  consistency?: number;
+}
+
+function countBadge(
+  key: string,
+  badge: string,
+  name: string,
+  description: string,
+  current: number,
+  target: number,
+  tone: "good" | "bad" = "good"
+): Achievement {
+  return {
+    key,
+    name,
+    badge,
+    description,
+    earned: current >= target,
+    tone,
+    progress: { current: Math.min(current, target), target },
+  };
+}
+
+// Largest margin in any won game (0 if no wins).
+function biggestWinMargin(matches: MatchHistoryEntry[]): number {
+  let best = 0;
+  for (const m of matches) {
+    if (m.result === "W") best = Math.max(best, m.points - m.conceded);
+  }
+  return best;
+}
+
+// True if the player won every game in some event with at least SWEEP_MIN_GAMES.
+function hasEventSweep(matches: MatchHistoryEntry[]): boolean {
+  const byEvent = new Map<string, MatchHistoryEntry[]>();
+  for (const m of matches) {
+    const list = byEvent.get(m.eventId) ?? [];
+    list.push(m);
+    byEvent.set(m.eventId, list);
+  }
+  for (const games of byEvent.values()) {
+    if (games.length >= SWEEP_MIN_GAMES && games.every((g) => g.result === "W")) return true;
+  }
+  return false;
+}
+
+function beatTopThree(matches: MatchHistoryEntry[], ctx: AchievementContext): boolean {
+  return matches.some((m) => m.result === "W" && m.opponentIds.some((id) => ctx.topRankIds.has(id)));
+}
+
+// A win over an opponent rated at least DAVID_RATING_GAP above the player.
+function hasDavidWin(matches: MatchHistoryEntry[], ctx: AchievementContext): boolean {
+  return matches.some((m) => {
+    if (m.result !== "W") return false;
+    const oppRatings = m.opponentIds.map((id) => ctx.ratingById.get(id)).filter((r): r is number => r !== undefined);
+    return oppRatings.some((r) => r - ctx.selfRating >= DAVID_RATING_GAP);
+  });
+}
+
+// Won a match where a named player was on the opposing side.
+function beatNamedOpponent(matches: MatchHistoryEntry[], name: string): boolean {
+  const target = nameKey(name);
+  return matches.some((m) => m.result === "W" && m.opponents.some((o) => nameKey(o) === target));
+}
+
+// The fewest points the player scored in any single game (null if no games).
+function lowestGameScore(matches: MatchHistoryEntry[]): number | null {
+  if (!matches.length) return null;
+  return matches.reduce((lo, m) => Math.min(lo, m.points), Infinity);
+}
+
+// Rating never dropped event-to-event and ended higher than it started, over a
+// meaningful number of events.
+function ratingSteadyClimb(history?: number[]): boolean {
+  if (!history || history.length < CLIMB_MIN_EVENTS) return false;
+  for (let i = 1; i < history.length; i++) {
+    if (history[i] < history[i - 1]) return false;
+  }
+  return history[history.length - 1] > history[0];
+}
+
+// Games sorted oldest → newest (dated first, then by round/court). Undated games
+// sort last. Used for streak/order-sensitive checks.
+function chronoAsc(matches: MatchHistoryEntry[]): MatchHistoryEntry[] {
+  return [...matches].sort((a, b) => {
+    const d = (a.playedOn ?? "9999-99").localeCompare(b.playedOn ?? "9999-99");
+    if (d !== 0) return d;
+    return a.round - b.round || a.court - b.court;
+  });
+}
+
+// Longest run of consecutive games with the given result, in chronological order.
+function longestResultStreak(matches: MatchHistoryEntry[], target: "W" | "L" | "D"): number {
+  let best = 0;
+  let run = 0;
+  for (const m of chronoAsc(matches)) {
+    if (m.result === target) {
+      run += 1;
+      best = Math.max(best, run);
+    } else {
+      run = 0;
+    }
+  }
+  return best;
+}
+
+// A win in which the player's team conceded nothing.
+function hasShutoutWin(matches: MatchHistoryEntry[]): boolean {
+  return matches.some((m) => m.result === "W" && m.conceded === 0);
+}
+
+// Lost a game by BLOWOUT_MARGIN or more.
+function hasBlowoutLoss(matches: MatchHistoryEntry[]): boolean {
+  return matches.some((m) => m.result === "L" && m.conceded - m.points >= BLOWOUT_MARGIN);
+}
+
+// Close games (margin ≤ 3) the player lost.
+function closeLosses(matches: MatchHistoryEntry[]): number {
+  return matches.filter((m) => m.result === "L" && Math.abs(m.points - m.conceded) <= 3).length;
+}
+
+// Most games the player played in any single event.
+function maxGamesInEvent(matches: MatchHistoryEntry[]): number {
+  const byEvent = new Map<string, number>();
+  for (const m of matches) byEvent.set(m.eventId, (byEvent.get(m.eventId) ?? 0) + 1);
+  let best = 0;
+  for (const n of byEvent.values()) best = Math.max(best, n);
+  return best;
+}
+
+// Beat an opponent who had beaten the player in an earlier game.
+function hasRevengeWin(matches: MatchHistoryEntry[]): boolean {
+  const lostTo = new Set<string>();
+  for (const m of chronoAsc(matches)) {
+    if (m.result === "W" && m.opponentIds.some((id) => lostTo.has(id))) return true;
+    if (m.result === "L") m.opponentIds.forEach((id) => lostTo.add(id));
+  }
+  return false;
+}
+
+// Returned to play after an absence of COMEBACK_GAP_DAYS+ between two events.
+function hasComebackGap(matches: MatchHistoryEntry[]): boolean {
+  const days = [...new Set(matches.map((m) => m.playedOn).filter((d): d is string => !!d))].sort();
+  for (let i = 1; i < days.length; i++) {
+    const gap = (Date.parse(days[i]) - Date.parse(days[i - 1])) / 86_400_000;
+    if (gap >= COMEBACK_GAP_DAYS) return true;
+  }
+  return false;
+}
+
+// Rating climbed by BIG_MOVER_GAIN+ from the first event to the latest.
+function isBigMover(history?: number[]): boolean {
+  if (!history || history.length < 2) return false;
+  return history[history.length - 1] - history[0] >= BIG_MOVER_GAIN;
+}
+
+// Finished bottom on points in an event with enough players for "last" to mean
+// something (no one scored fewer than the player; ties at the bottom count).
+function hasWoodenSpoon(ctx: AchievementContext): boolean {
+  if (!ctx.results || !ctx.selfId) return false;
+  const byEvent = new Map<string, Map<string, number>>();
+  for (const r of ctx.results) {
+    let totals = byEvent.get(r.eventId);
+    if (!totals) {
+      totals = new Map();
+      byEvent.set(r.eventId, totals);
+    }
+    totals.set(r.playerId, (totals.get(r.playerId) ?? 0) + r.points);
+  }
+  for (const totals of byEvent.values()) {
+    const mine = totals.get(ctx.selfId);
+    if (mine === undefined || totals.size < WOODEN_SPOON_MIN_PLAYERS) continue;
+    let last = true;
+    for (const [pid, pts] of totals) {
+      if (pid !== ctx.selfId && pts < mine) {
+        last = false;
+        break;
+      }
+    }
+    if (last) return true;
+  }
+  return false;
+}
+
+// Finished above a named rival on total points in at least one shared event.
+// In Mexicano/Americano an event's standing is its points total, so out-scoring
+// the rival across an event means finishing above them.
+function outplacedNamedRival(ctx: AchievementContext, rivalName: string): boolean {
+  if (!ctx.results || !ctx.selfId) return false;
+  const target = nameKey(rivalName);
+  const selfByEvent = new Map<string, number>();
+  const rivalByEvent = new Map<string, number>();
+  for (const r of ctx.results) {
+    if (r.playerId === ctx.selfId) {
+      selfByEvent.set(r.eventId, (selfByEvent.get(r.eventId) ?? 0) + r.points);
+    } else if (nameKey(r.name) === target) {
+      rivalByEvent.set(r.eventId, (rivalByEvent.get(r.eventId) ?? 0) + r.points);
+    }
+  }
+  for (const [eventId, mine] of selfByEvent) {
+    const theirs = rivalByEvent.get(eventId);
+    if (theirs !== undefined && mine > theirs) return true;
+  }
+  return false;
+}
+
+// Compute the full achievement catalog for a player, earned flags filled in.
+// Always returns every badge (earned and locked) in a stable order so the UI can
+// show progress toward the locked ones.
+export function computeAchievements(
+  row: CareerStatRow,
+  matches: MatchHistoryEntry[],
+  ctx?: AchievementContext
+): Achievement[] {
+  const events = new Set(matches.map((m) => m.eventId)).size;
+  const longestWinStreak = computeForm(matches).longestWinStreak;
+  const lowScore = lowestGameScore(matches);
+  const partners = partnerChemistry(matches).partners;
+  const opponents = opponentRecords(matches);
+  const venues = venueRecords(matches).length;
+  const advanced = ctx ? ADVANCED_LEVELS.has(levelForRating(ctx.selfRating).key) : false;
+
+  const binary = (
+    key: string,
+    badge: string,
+    name: string,
+    description: string,
+    earned: boolean,
+    tone: "good" | "bad" = "good"
+  ): Achievement => ({ key, name, badge, description, earned, tone });
+
+  return [
+    // --- Volume / loyalty ---------------------------------------------------
+    countBadge("half-century", "🏆", "Half Century", "Play 50 career games.", row.games, 50),
+    countBadge("centurion", "💯", "Centurion", "Play 100 career games.", row.games, 100),
+    countBadge("regular", "📅", "Regular", "Show up to 10 events.", events, 10),
+    countBadge("winner", "🏅", "Winner", `Win ${WIN_BRONZE} career games.`, row.wins, WIN_BRONZE),
+    countBadge("champion", "👑", "Champion", `Win ${WIN_GOLD} career games.`, row.wins, WIN_GOLD),
+    countBadge("legend", "🐐", "Legend", `Win ${WIN_LEGEND} career games.`, row.wins, WIN_LEGEND),
+    countBadge("point-machine", "💰", "Point Machine", `Score ${POINTS_TARGET} career points.`, row.points_for, POINTS_TARGET),
+    countBadge("point-tycoon", "🤑", "Point Tycoon", `Score ${POINTS_TYCOON} career points.`, row.points_for, POINTS_TYCOON),
+    // --- Streaks & skill ----------------------------------------------------
+    countBadge("hot-streak", "🔥", "Hot Streak", "Win 5 games in a row.", longestWinStreak, 5),
+    countBadge("on-fire", "🌋", "On Fire", "Win 10 games in a row.", longestWinStreak, 10),
+    countBadge("clutch", "❄️", "Ice Cold", "Win 10 close games (≤3 pts).", row.close_wins, 10),
+    binary(
+      "sharpshooter",
+      "🎯",
+      "Sharpshooter",
+      `Win a game by ${BLOWOUT_MARGIN}+ points.`,
+      biggestWinMargin(matches) >= BLOWOUT_MARGIN
+    ),
+    binary("clean-sheet", "🧤", "Clean Sheet", "Win a game conceding 0.", hasShutoutWin(matches)),
+    binary("unbeaten", "🛡️", "Unbeaten Night", "Win every game in an event.", hasEventSweep(matches)),
+    binary(
+      "high-roller",
+      "📊",
+      "High Roller",
+      `Hold a ${Math.round(HIGH_WIN_RATE * 100)}% win rate over ${HIGH_WIN_RATE_MIN_GAMES}+ games.`,
+      row.games >= HIGH_WIN_RATE_MIN_GAMES && row.wins / row.games >= HIGH_WIN_RATE
+    ),
+    binary(
+      "mr-reliable",
+      "🧱",
+      "Mr. Reliable",
+      `Stay highly consistent over ${MR_RELIABLE_MIN_GAMES}+ games.`,
+      ctx?.consistency != null && ctx.consistency >= MR_RELIABLE_CONSISTENCY && row.games >= MR_RELIABLE_MIN_GAMES
+    ),
+    // --- Rank & rating ------------------------------------------------------
+    binary("podium", "🥇", "Podium", "Sit in the current top 3.", ctx?.rank != null && ctx.rank <= 3),
+    binary("apex", "🔝", "Apex", "Reach #1 on the leaderboard.", ctx?.rank === 1),
+    binary("level-up", "🎖️", "Level Up", "Reach Advanced level or above.", advanced),
+    binary(
+      "on-the-up",
+      "📈",
+      "On the Up",
+      `Never drop your rating across ${CLIMB_MIN_EVENTS}+ events.`,
+      ratingSteadyClimb(ctx?.ratingHistory)
+    ),
+    binary("big-mover", "🚀", "Big Mover", `Climb ${BIG_MOVER_GAIN}+ rating from your first event.`, isBigMover(ctx?.ratingHistory)),
+    // --- Skill vs the field -------------------------------------------------
+    binary(
+      "giant-killer",
+      "🗡️",
+      "Giant Killer",
+      "Beat a top-3 ranked player.",
+      ctx ? beatTopThree(matches, ctx) : false
+    ),
+    binary(
+      "david",
+      "🪨",
+      "David",
+      `Beat an opponent rated ${DAVID_RATING_GAP.toFixed(1)}+ above you.`,
+      ctx ? hasDavidWin(matches, ctx) : false
+    ),
+    binary("revenge", "🔁", "Revenge", "Beat someone who had beaten you before.", hasRevengeWin(matches)),
+    // --- Social / partnerships ----------------------------------------------
+    countBadge(
+      "social-butterfly",
+      "🦋",
+      "Social Butterfly",
+      `Partner with ${SOCIAL_BUTTERFLY_PARTNERS} different players.`,
+      partners.length,
+      SOCIAL_BUTTERFLY_PARTNERS
+    ),
+    binary(
+      "dynamic-duo",
+      "🤝",
+      "Dynamic Duo",
+      `Win ${DYNAMIC_DUO_WINS} games with one partner.`,
+      partners.some((p) => p.wins >= DYNAMIC_DUO_WINS)
+    ),
+    countBadge("globetrotter", "🌍", "Globetrotter", `Play at ${GLOBETROTTER_VENUES} different venues.`, venues, GLOBETROTTER_VENUES),
+    binary(
+      "domination",
+      "😈",
+      "Domination",
+      `Beat the same opponent ${DOMINATION_WINS} times.`,
+      opponents.some((o) => o.wins >= DOMINATION_WINS)
+    ),
+    // --- Story ---------------------------------------------------------------
+    binary("marathoner", "🏃", "Marathoner", `Play ${MARATHON_GAMES}+ games in one event.`, maxGamesInEvent(matches) >= MARATHON_GAMES),
+    binary("comeback-kid", "🔙", "Comeback Kid", `Return after ${COMEBACK_GAP_DAYS}+ days away.`, hasComebackGap(matches)),
+    // --- Named "easter-egg" rivalries — specific to this league -------------
+    binary("nemesis-slayer", "⚔️", "Nemesis Slayer", `Beat ${NAMED_NEMESIS} in a match.`, beatNamedOpponent(matches, NAMED_NEMESIS)),
+    binary(
+      "econ-beater",
+      "🆙",
+      "Better Than Econ",
+      `Finish an event above ${NAMED_RANK_RIVAL}.`,
+      ctx ? outplacedNamedRival(ctx, NAMED_RANK_RIVAL) : false
+    ),
+    // --- Badges of shame — earned by misfortune, worn with pride -----------
+    binary("off-day", "🥶", "Off Day", `Score under ${LOW_SCORE} in a game.`, lowScore !== null && lowScore < LOW_SCORE, "bad"),
+    binary("donut", "🍩", "Donut", "Score 0 in a game.", lowScore === 0, "bad"),
+    binary("blown-out", "💥", "Blown Out", `Lose a game by ${BLOWOUT_MARGIN}+ points.`, hasBlowoutLoss(matches), "bad"),
+    countBadge("heartbreaker", "💔", "Heartbreaker", "Lose 5 close games (≤3 pts).", closeLosses(matches), HEARTBREAK_TARGET, "bad"),
+    countBadge("cold-streak", "🧊", "Cold Streak", "Lose 5 games in a row.", longestResultStreak(matches, "L"), LOSS_STREAK_TARGET, "bad"),
+    binary("wooden-spoon", "🥄", "Wooden Spoon", "Finish last in an event.", ctx ? hasWoodenSpoon(ctx) : false, "bad"),
+  ];
+}

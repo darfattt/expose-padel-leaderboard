@@ -186,6 +186,64 @@ export async function getEvent(id: string): Promise<EventRow | null> {
   }
 }
 
+// One per-player row for every game in an event (4 rows per match). Unlike
+// getEventResults (team-level, names only) this carries player ids + per-player
+// points, so per-event awards (lib/awards.ts) can aggregate by player and by
+// pairing. Two queries + in-memory join (no N+1).
+export interface EventPlayerResult {
+  matchId: string;
+  round: number;
+  court: number;
+  team: number; // 1 or 2
+  playerId: string;
+  name: string;
+  points: number; // own team's score
+  conceded: number; // opponent team's score
+  won: boolean;
+  isDraw: boolean;
+}
+
+export async function getEventPlayerResults(eventId: string): Promise<EventPlayerResult[]> {
+  try {
+    const supabase = createReadClient();
+    const { data: matches, error } = await supabase
+      .from("matches")
+      .select("id, round, court")
+      .eq("event_id", eventId);
+    if (error) throw error;
+    if (!matches?.length) return [];
+
+    const meta = new Map(
+      matches.map((m) => [m.id as string, { round: m.round as number, court: m.court as number }])
+    );
+    const matchIds = matches.map((m) => m.id as string);
+    const { data: mps, error: e2 } = await supabase
+      .from("match_players")
+      .select("match_id, team, player_id, points, conceded, won, is_draw, players!inner(name)")
+      .in("match_id", matchIds);
+    if (e2) throw e2;
+
+    return (mps ?? []).map((r) => {
+      const player = Array.isArray(r.players) ? r.players[0] : r.players;
+      const m = meta.get(r.match_id as string)!;
+      return {
+        matchId: r.match_id as string,
+        round: m.round,
+        court: m.court,
+        team: r.team as number,
+        playerId: r.player_id as string,
+        name: (player as { name: string }).name,
+        points: r.points as number,
+        conceded: r.conceded as number,
+        won: r.won as boolean,
+        isDraw: r.is_draw as boolean,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function getEventResults(eventId: string): Promise<EventMatch[]> {
   try {
     const supabase = createReadClient();
