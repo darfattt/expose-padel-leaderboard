@@ -36,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav className="hidden sm:flex items-center gap-8 text-sm text-body-muted">
             <Link href="/" className="hover:text-ink">Leaderboard</Link>
             <Link href="/rackets" className="hover:text-ink">Rackets</Link>
+            <Link href="/versus" className="hover:text-ink">Versus</Link>
             <Link href="/events" className="hover:text-ink">Events</Link>
             <Link href="/scatter" className="hover:text-ink">Scatter analysis</Link>
             <Link href="/upload" className="hover:text-ink">Upload</Link>

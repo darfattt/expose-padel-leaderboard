@@ -26,9 +26,14 @@ export default async function HeadToHeadPage({
 
   return (
     <div>
-      <Link href={`/players/${id}`} className="btn-secondary text-sm">
-        ← {player.name}
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link href={`/players/${id}`} className="btn-secondary text-sm">
+          ← {player.name}
+        </Link>
+        <Link href={`/versus?a=${id}&b=${oppId}`} className="btn-secondary text-sm">
+          Full tale of the tape →
+        </Link>
+      </div>
 
       {/* Header */}
       <div className="mt-4 mb-10">
