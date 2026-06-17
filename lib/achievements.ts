@@ -1,5 +1,6 @@
 import { levelForRating } from "./levels";
 import type { MatchHistoryEntry } from "./queries";
+import { MAX_RATING, reliabilityCap } from "./rating";
 import { computeForm, opponentRecords, partnerChemistry, venueRecords } from "./relationships";
 import type { RawResult } from "./standings";
 import type { CareerStatRow } from "./types";
@@ -26,6 +27,14 @@ export const WIN_LEGEND = 100;
 // Career-points milestone thresholds.
 export const POINTS_TARGET = 1000;
 export const POINTS_TYCOON = 5000;
+// Career net-points (point differential) milestone. The rating engine treats net
+// points — not raw points-for — as the earned total that unlocks higher levels
+// (see RELIABILITY_TIERS in lib/rating.ts), so we reward out-scoring opponents
+// directly: this bar sits in the Controller gate's net-points range.
+export const NET_POINTS_TARGET = 400;
+// Games needed before a positive career differential is meaningful (not a thin,
+// lucky sample). Mirrors the spirit of the reliability gates.
+export const IN_THE_BLACK_MIN_GAMES = 10;
 // High Roller: win rate over a meaningful sample.
 export const HIGH_WIN_RATE = 0.7;
 export const HIGH_WIN_RATE_MIN_GAMES = 20;
@@ -51,6 +60,13 @@ export const WOODEN_SPOON_MIN_PLAYERS = 4; // event size before "last" is meanin
 // Story thresholds.
 export const COMEBACK_GAP_DAYS = 60; // absence before a return counts as a comeback
 export const MARATHON_GAMES = 8; // games in a single event
+// Events, venues & cadence thresholds.
+export const VETERAN_EVENTS = 25; // events attended (a step beyond Regular's 10)
+export const EVENT_CHAMPION_MIN_PLAYERS = 4; // event size before "winning it" is meaningful
+export const HOME_TURF_WINS = 10; // wins at a single venue — your fortress
+export const ROAD_WARRIOR_VENUES = 3; // distinct venues with at least one win
+export const IRON_WEEK_DAYS = 7; // window for "two events inside a week"
+export const WEEKLY_HABIT_WEEKS = 8; // distinct calendar weeks with a game played
 
 // Named "easter-egg" rivals — these badges are about specific people in the
 // league. Matched by normalized name, so they no-op in leagues without them.
@@ -274,6 +290,75 @@ function hasWoodenSpoon(ctx: AchievementContext): boolean {
   return false;
 }
 
+// Won an event outright: finished top on total points in an event with enough
+// players for "winning it" to mean something. Ties at the top still count (shared
+// first place). The mirror image of hasWoodenSpoon.
+function hasEventWin(ctx: AchievementContext): boolean {
+  if (!ctx.results || !ctx.selfId) return false;
+  const byEvent = new Map<string, Map<string, number>>();
+  for (const r of ctx.results) {
+    let totals = byEvent.get(r.eventId);
+    if (!totals) {
+      totals = new Map();
+      byEvent.set(r.eventId, totals);
+    }
+    totals.set(r.playerId, (totals.get(r.playerId) ?? 0) + r.points);
+  }
+  for (const totals of byEvent.values()) {
+    const mine = totals.get(ctx.selfId);
+    if (mine === undefined || totals.size < EVENT_CHAMPION_MIN_PLAYERS) continue;
+    let top = true;
+    for (const [pid, pts] of totals) {
+      if (pid !== ctx.selfId && pts > mine) {
+        top = false;
+        break;
+      }
+    }
+    if (top) return true;
+  }
+  return false;
+}
+
+// The day-number (days since the Unix epoch, UTC) of a yyyy-mm-dd date, or null
+// when missing/unparseable. A stable integer key for week/window arithmetic.
+function dayNumber(date: string | null): number | null {
+  if (!date) return null;
+  const t = Date.parse(date);
+  if (Number.isNaN(t)) return null;
+  return Math.floor(t / 86_400_000);
+}
+
+// Played two or more distinct events within any IRON_WEEK_DAYS window. Events are
+// reduced to their earliest dated game; the closest pair of event dates is an
+// adjacent pair once sorted, so an adjacency scan finds the tightest week.
+function hasBusyWeek(matches: MatchHistoryEntry[]): boolean {
+  const eventDay = new Map<string, number>();
+  for (const m of matches) {
+    const day = dayNumber(m.playedOn);
+    if (day === null) continue;
+    const prev = eventDay.get(m.eventId);
+    if (prev === undefined || day < prev) eventDay.set(m.eventId, day);
+  }
+  const days = [...eventDay.values()].sort((a, b) => a - b);
+  for (let i = 1; i < days.length; i++) {
+    if (days[i] - days[i - 1] <= IRON_WEEK_DAYS) return true;
+  }
+  return false;
+}
+
+// Number of distinct ISO (Monday-based) calendar weeks the player has a dated
+// game in — a measure of how regularly, week to week, they show up.
+function distinctWeeks(matches: MatchHistoryEntry[]): number {
+  const weeks = new Set<number>();
+  for (const m of matches) {
+    const day = dayNumber(m.playedOn);
+    if (day === null) continue;
+    const dow = (new Date(day * 86_400_000).getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+    weeks.add(day - dow); // day-number of that week's Monday
+  }
+  return weeks.size;
+}
+
 // Finished above a named rival on total points in at least one shared event.
 // In Mexicano/Americano an event's standing is its points total, so out-scoring
 // the rival across an event means finishing above them.
@@ -309,7 +394,10 @@ export function computeAchievements(
   const lowScore = lowestGameScore(matches);
   const partners = partnerChemistry(matches).partners;
   const opponents = opponentRecords(matches);
-  const venues = venueRecords(matches).length;
+  const venueRecs = venueRecords(matches);
+  const venues = venueRecs.length;
+  const venuesWon = venueRecs.filter((v) => v.wins >= 1).length;
+  const weeks = distinctWeeks(matches);
   const advanced = ctx ? ADVANCED_LEVELS.has(levelForRating(ctx.selfRating).key) : false;
 
   const binary = (
@@ -326,11 +414,35 @@ export function computeAchievements(
     countBadge("half-century", "🏆", "Half Century", "Play 50 career games.", row.games, 50),
     countBadge("centurion", "💯", "Centurion", "Play 100 career games.", row.games, 100),
     countBadge("regular", "📅", "Regular", "Show up to 10 events.", events, 10),
+    countBadge("veteran", "🎟️", "Veteran", `Show up to ${VETERAN_EVENTS} events.`, events, VETERAN_EVENTS),
     countBadge("winner", "🏅", "Winner", `Win ${WIN_BRONZE} career games.`, row.wins, WIN_BRONZE),
     countBadge("champion", "👑", "Champion", `Win ${WIN_GOLD} career games.`, row.wins, WIN_GOLD),
     countBadge("legend", "🐐", "Legend", `Win ${WIN_LEGEND} career games.`, row.wins, WIN_LEGEND),
     countBadge("point-machine", "💰", "Point Machine", `Score ${POINTS_TARGET} career points.`, row.points_for, POINTS_TARGET),
     countBadge("point-tycoon", "🤑", "Point Tycoon", `Score ${POINTS_TYCOON} career points.`, row.points_for, POINTS_TYCOON),
+    // --- Net points & reliability (the rating engine's earned totals) -------
+    binary(
+      "in-the-black",
+      "🟢",
+      "In the Black",
+      `Keep a positive net point differential over ${IN_THE_BLACK_MIN_GAMES}+ games.`,
+      row.games >= IN_THE_BLACK_MIN_GAMES && row.point_diff > 0
+    ),
+    countBadge(
+      "margin-merchant",
+      "💹",
+      "Margin Merchant",
+      `Bank +${NET_POINTS_TARGET} career net points (scored minus conceded).`,
+      Math.max(0, row.point_diff),
+      NET_POINTS_TARGET
+    ),
+    binary(
+      "certified",
+      "🎓",
+      "Certified",
+      "Clear every reliability gate — prove out the full 0–7 ladder.",
+      reliabilityCap({ score: row.point_diff, wins: row.wins }) >= MAX_RATING
+    ),
     // --- Streaks & skill ----------------------------------------------------
     countBadge("hot-streak", "🔥", "Hot Streak", "Win 5 games in a row.", longestWinStreak, 5),
     countBadge("on-fire", "🌋", "On Fire", "Win 10 games in a row.", longestWinStreak, 10),
@@ -409,6 +521,44 @@ export function computeAchievements(
       "Domination",
       `Beat the same opponent ${DOMINATION_WINS} times.`,
       opponents.some((o) => o.wins >= DOMINATION_WINS)
+    ),
+    // --- Events, venues & cadence -------------------------------------------
+    binary(
+      "event-champion",
+      "🏟️",
+      "Event Champion",
+      "Top the points table to win an event.",
+      ctx ? hasEventWin(ctx) : false
+    ),
+    binary(
+      "home-turf",
+      "🏠",
+      "Home Turf",
+      `Win ${HOME_TURF_WINS} games at a single venue.`,
+      venueRecs.some((v) => v.wins >= HOME_TURF_WINS)
+    ),
+    countBadge(
+      "road-warrior",
+      "🗺️",
+      "Road Warrior",
+      `Win a game at ${ROAD_WARRIOR_VENUES} different venues.`,
+      venuesWon,
+      ROAD_WARRIOR_VENUES
+    ),
+    binary(
+      "iron-week",
+      "⚡",
+      "Iron Week",
+      `Play two events within ${IRON_WEEK_DAYS} days.`,
+      hasBusyWeek(matches)
+    ),
+    countBadge(
+      "weekly-habit",
+      "🗓️",
+      "Weekly Habit",
+      `Play in ${WEEKLY_HABIT_WEEKS} different calendar weeks.`,
+      weeks,
+      WEEKLY_HABIT_WEEKS
     ),
     // --- Story ---------------------------------------------------------------
     binary("marathoner", "🏃", "Marathoner", `Play ${MARATHON_GAMES}+ games in one event.`, maxGamesInEvent(matches) >= MARATHON_GAMES),

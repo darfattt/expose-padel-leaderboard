@@ -6,10 +6,11 @@ import type { RankedPlayer } from "./leaderboard";
 import { levelForRating } from "./levels";
 import { proCandidates } from "./pros";
 import type { MatchHistoryEntry } from "./queries";
+import { nextReliabilityGate, reliabilityCap } from "./rating";
 import { relationshipSummary } from "./relationships";
 
 // Bump when the prompt/schema changes so cached reports regenerate.
-const PROMPT_VERSION = "v8-playtomic-7-scale";
+const PROMPT_VERSION = "v9-reliability-net-points";
 
 export const proComparisonSchema = z.object({
   name: z.string().describe("Full name of a real professional padel player."),
@@ -62,6 +63,14 @@ export function buildReportFacts(input: ReportInput): string {
   const candidates = proCandidates(player.rating, player.archetype.primary);
   const level = levelForRating(player.rating);
 
+  // Reliability framing: this league only trusts a high level once it's earned on
+  // net points + wins (see lib/rating.ts), so a hot streak can't fake an Elite
+  // rating. Surface where the player sits relative to that gate.
+  const reliability = { score: r.point_diff, wins: r.wins };
+  const cap = reliabilityCap(reliability);
+  const gate = nextReliabilityGate(reliability);
+  const capped = gate !== null && player.rating >= cap - 1e-9;
+
   return [
     `Player: ${r.name}`,
     `Performance rating: ${player.rating.toFixed(1)}/7 (Playtomic scale)${player.provisional ? " (provisional — fewer than 3 games)" : ""}`,
@@ -69,8 +78,13 @@ export function buildReportFacts(input: ReportInput): string {
     `Archetype: ${player.archetype.label} — ${player.archetype.description}`,
     `Attributes (0-100): Power ${a.attack}, Consistency ${a.consistency}, Clutch ${a.clutch}, Win ${a.win}`,
     `Record: ${r.wins}W-${r.losses}L-${r.draws}D over ${r.games} games`,
-    `Points for/against: ${r.points_for} / ${r.points_against} (differential ${r.point_diff >= 0 ? "+" : ""}${r.point_diff})`,
+    `Points for/against: ${r.points_for} / ${r.points_against} (net ${r.point_diff >= 0 ? "+" : ""}${r.point_diff} — scored minus conceded; net points, not raw scoring, is what earns higher levels here)`,
     `Close games (margin <= 3): ${r.close_wins} won of ${r.close_games}`,
+    `Reliability: proven up to ${cap.toFixed(1)}/7 (${levelForRating(cap).category}). ${
+      gate
+        ? `Needs +${gate.scoreNeeded} more net points and ${gate.winsNeeded} more wins to unlock the ${levelForRating(gate.tier.level).category} band.`
+        : `Fully certified — every reliability gate cleared, the whole 0–7 ladder is unlocked.`
+    }${capped ? " Their rating is currently held at this ceiling by reliability, not performance — they are out-playing their proven sample and knocking on the next band's door." : ""}`,
     ``,
     `Partnerships, rivalries & form:`,
     relationshipSummary(matches),
@@ -93,6 +107,8 @@ Rules:
 - Reference the player's archetype and their standout numbers (rating, record, scoring, clutch record).
 - Where it adds colour, weave in one relational detail from the partnerships/rivalries/form section (e.g. a go-to partner, a nemesis, or a current streak). Only if present — never invent names or streaks.
 - In "similarPros", compare the player's PLAYSTYLE to professional padel players. Pick 1-3 ONLY from the supplied candidate list — never name a pro who isn't listed. The list is already scoped to the FIP world-rank tier that matches this player's rating, so treat the pick as a fitting caliber comparison. For each, give a one-clause reason linking the pick to this player's actual stats/archetype (e.g. "same point-a-minute scoring", "wins the tight ones like…").
+- Treat NET points (scored minus conceded), not raw points-for, as the meaningful scoring stat — that is what earns higher levels in this league.
+- A "Reliability" line shows how much of the 0-7 ladder the player has proven out. If it says their rating is held at a ceiling by reliability, you may frame them as out-playing their sample / knocking on the next band's door — but never quote gate numbers the line didn't give you, and don't claim a level they haven't reached. If fully certified, you may note they've proven the whole ladder.
 - Keep the report 2-4 sentences, energetic but factual. No hype the numbers don't support.
 - If stats are provisional (few games), acknowledge the small sample.`;
 
