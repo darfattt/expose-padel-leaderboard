@@ -72,6 +72,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
     selfId: r.player_id,
     results,
     consistency: player.attributes.consistency,
+    gear,
   });
 
   return (

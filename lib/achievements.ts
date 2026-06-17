@@ -3,7 +3,7 @@ import type { MatchHistoryEntry } from "./queries";
 import { MAX_RATING, reliabilityCap } from "./rating";
 import { computeForm, opponentRecords, partnerChemistry, venueRecords } from "./relationships";
 import type { RawResult } from "./standings";
-import type { CareerStatRow } from "./types";
+import type { CareerStatRow, PlayerGear } from "./types";
 
 // Career achievements / badges — lightweight gamification derived purely from a
 // player's facts (career row + match history), with optional leaderboard context
@@ -107,6 +107,8 @@ export interface AchievementContext {
   // The player's Consistency attribute (0–100, field-relative; see archetype.ts)
   // for the Mr. Reliable badge.
   consistency?: number;
+  // The player's saved gear/position (racket + on-court side) for the gear badges.
+  gear?: PlayerGear;
 }
 
 function countBadge(
@@ -559,6 +561,17 @@ export function computeAchievements(
       `Play in ${WEEKLY_HABIT_WEEKS} different calendar weeks.`,
       weeks,
       WEEKLY_HABIT_WEEKS
+    ),
+    // --- Gear & setup -------------------------------------------------------
+    binary("geared-up", "🎒", "Geared Up", "Register your racket in your profile.", !!ctx?.gear?.racketSlug),
+    binary("take-your-side", "🧭", "Take Your Side", "Set your on-court position.", !!ctx?.gear?.position),
+    binary("switch-hitter", "🔀", "Switch Hitter", "Mark yourself comfortable on either side.", ctx?.gear?.position === "Both"),
+    binary(
+      "fully-kitted",
+      "🎽",
+      "Fully Kitted",
+      "Complete your profile — racket and position both set.",
+      !!ctx?.gear?.racketSlug && !!ctx?.gear?.position
     ),
     // --- Story ---------------------------------------------------------------
     binary("marathoner", "🏃", "Marathoner", `Play ${MARATHON_GAMES}+ games in one event.`, maxGamesInEvent(matches) >= MARATHON_GAMES),

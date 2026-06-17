@@ -405,6 +405,50 @@ describe("computeAchievements — events, venues & cadence", () => {
   });
 });
 
+describe("computeAchievements — gear & setup", () => {
+  const ctx = (gear: AchievementContext["gear"]): AchievementContext => ({
+    rank: null,
+    topRankIds: new Set(),
+    ratingById: new Map(),
+    selfRating: 5,
+    gear,
+  });
+  const fullGear = {
+    position: "Right" as const,
+    racketSlug: "babolat-air-viper",
+    racketName: "Air Viper",
+    racketBrand: "Babolat",
+    racketImage: null,
+  };
+
+  it("earns Geared Up once a racket is registered", () => {
+    expect(byKey(career(), [], ctx(fullGear)).get("geared-up")!.earned).toBe(true);
+    expect(byKey(career(), [], ctx({ ...fullGear, racketSlug: null })).get("geared-up")!.earned).toBe(false);
+  });
+
+  it("earns Take Your Side once a position is set", () => {
+    expect(byKey(career(), [], ctx(fullGear)).get("take-your-side")!.earned).toBe(true);
+    expect(byKey(career(), [], ctx({ ...fullGear, position: null })).get("take-your-side")!.earned).toBe(false);
+  });
+
+  it("earns Switch Hitter only for the Both position", () => {
+    expect(byKey(career(), [], ctx({ ...fullGear, position: "Both" })).get("switch-hitter")!.earned).toBe(true);
+    expect(byKey(career(), [], ctx(fullGear)).get("switch-hitter")!.earned).toBe(false);
+  });
+
+  it("earns Fully Kitted only when racket and position are both set", () => {
+    expect(byKey(career(), [], ctx(fullGear)).get("fully-kitted")!.earned).toBe(true);
+    expect(byKey(career(), [], ctx({ ...fullGear, position: null })).get("fully-kitted")!.earned).toBe(false);
+    expect(byKey(career(), [], ctx({ ...fullGear, racketSlug: null })).get("fully-kitted")!.earned).toBe(false);
+  });
+
+  it("reports gear badges unearned without context", () => {
+    const m = byKey(career(), []);
+    expect(m.get("geared-up")!.earned).toBe(false);
+    expect(m.get("fully-kitted")!.earned).toBe(false);
+  });
+});
+
 describe("computeAchievements — more shame", () => {
   it("earns Blown Out on a 10+ point loss", () => {
     const a = byKey(career(), [match({ result: "L", points: 5, conceded: 21 })]).get("blown-out")!;

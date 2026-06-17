@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getRankedPlayer } from "@/lib/leaderboard";
-import { getPlayerMatchHistory } from "@/lib/queries";
+import type { AchievementContext } from "@/lib/achievements";
+import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
+import { getPlayerGear, getPlayerMatchHistory } from "@/lib/queries";
+import { buildRatingHistory } from "@/lib/rating-history";
 import {
   buildReportFacts,
   generatePlayerReport,
+  type ReportInput,
   reportInputHash,
   reportModel,
   reportsEnabled,
@@ -29,11 +32,39 @@ export async function getOrCreatePlayerReport(
   playerId: string,
   force = false
 ): Promise<PlayerReportView | null> {
-  const player = await getRankedPlayer(playerId);
+  // The full field gives us both the player (rated against everyone) and the
+  // context the field-relative badges need (top-3 ids, every rating, results).
+  const board = await getLeaderboard();
+  const player = board.find((p) => p.row.player_id === playerId);
   if (!player) return null;
 
-  const matches = await getPlayerMatchHistory(playerId);
-  const facts = buildReportFacts({ player, matches });
+  const [matches, ratingField, results, gear] = await Promise.all([
+    getPlayerMatchHistory(playerId),
+    getRatingField(),
+    fetchRawResults(),
+    getPlayerGear(playerId),
+  ]);
+
+  const ratingHistory = buildRatingHistory(matches, ratingField, {
+    id: player.row.player_id,
+    name: player.row.name,
+  });
+  const context: AchievementContext = {
+    rank: player.rank,
+    topRankIds: new Set(
+      board.filter((p) => p.rank !== null && p.rank <= 3).map((p) => p.row.player_id)
+    ),
+    ratingById: new Map(board.map((p) => [p.row.player_id, p.rating])),
+    selfRating: player.rating,
+    ratingHistory: ratingHistory.map((h) => h.rating),
+    selfId: player.row.player_id,
+    results,
+    consistency: player.attributes.consistency,
+    gear,
+  };
+
+  const reportInput: ReportInput = { player, matches, context, gear };
+  const facts = buildReportFacts(reportInput);
 
   let supabase;
   try {
@@ -69,7 +100,7 @@ export async function getOrCreatePlayerReport(
 
   let generated;
   try {
-    generated = await generatePlayerReport({ player, matches });
+    generated = await generatePlayerReport(reportInput);
   } catch {
     return null;
   }
