@@ -101,6 +101,19 @@ export const FLAT_TRACK_MIN_WINS = 15;
 export const NAMED_NEMESIS = "Adhitia putra herawan"; // beat them in a match
 export const NAMED_RANK_RIVAL = "Bang Econ"; // finish an event above them
 
+// --- Clubs & locations -----------------------------------------------------
+// Now that events are scoped to clubs (lib/clubs.ts), reward playing across the
+// league's communities. A club is counted from the event's club_id (carried on
+// each match in the history), so these stay distinct from the venue/location
+// badges above (Globetrotter/Road Warrior, which key off the free-text location).
+export const CLUB_HOPPER_CLUBS = 2; // play at 2 different clubs
+export const FREE_AGENT_CLUBS = 3; // play at 3 different clubs
+export const ONE_CLUB_MIN_GAMES = 20; // games before one-club loyalty is meaningful
+// Named "easter-egg" location — a specific venue. Matched by case-insensitive
+// substring on the event location, so it no-ops in leagues that never play there.
+// Point NAMED_LOCATION at a venue that actually appears in your data.
+export const NAMED_LOCATION = "Grand Wisata"; // play a game at this venue
+
 // Local name key (mirrors normalizeName in lib/normalize.ts without pulling its
 // node:crypto import in). Lowercased, trimmed, inner whitespace collapsed.
 function nameKey(name: string): string {
@@ -496,6 +509,33 @@ function outplacedNamedRival(ctx: AchievementContext, rivalName: string): boolea
   return false;
 }
 
+// Distinct clubs the player has appeared in, keyed by club id (falling back to
+// the normalized club name). Drives the multi-club badges. Games on events with
+// no club tag are ignored.
+function distinctClubs(matches: MatchHistoryEntry[]): number {
+  const clubs = new Set<string>();
+  for (const m of matches) {
+    const key = m.clubId ?? (m.clubName ? nameKey(m.clubName) : null);
+    if (key) clubs.add(key);
+  }
+  return clubs.size;
+}
+
+// True when every club-tagged game is at a single club, over a meaningful
+// sample — the loyalist mirror of the club-hopper badges.
+function isOneClubPlayer(matches: MatchHistoryEntry[]): boolean {
+  const tagged = matches.filter((m) => m.clubId ?? m.clubName);
+  return tagged.length >= ONE_CLUB_MIN_GAMES && distinctClubs(matches) === 1;
+}
+
+// Played at least one game at a named venue (case-insensitive substring on the
+// free-text event location), so partial venue names match.
+function playedAtLocation(matches: MatchHistoryEntry[], needle: string): boolean {
+  const target = needle.toLowerCase().trim();
+  if (!target) return false;
+  return matches.some((m) => (m.location ?? "").toLowerCase().includes(target));
+}
+
 // Compute the full achievement catalog for a player, earned flags filled in.
 // Always returns every badge (earned and locked) in a stable order so the UI can
 // show progress toward the locked ones.
@@ -512,6 +552,7 @@ export function computeAchievements(
   const venueRecs = venueRecords(matches);
   const venues = venueRecs.length;
   const venuesWon = venueRecs.filter((v) => v.wins >= 1).length;
+  const clubs = distinctClubs(matches);
   const weeks = distinctWeeks(matches);
   const advanced = ctx ? ADVANCED_LEVELS.has(levelForRating(ctx.selfRating).key) : false;
 
@@ -711,6 +752,30 @@ export function computeAchievements(
       weeks,
       WEEKLY_HABIT_WEEKS
     ),
+    // --- Clubs (multi-community play) ---------------------------------------
+    countBadge(
+      "club-hopper",
+      "🎪",
+      "Club Hopper",
+      `Play at ${CLUB_HOPPER_CLUBS} different clubs.`,
+      clubs,
+      CLUB_HOPPER_CLUBS
+    ),
+    countBadge(
+      "free-agent",
+      "🧳",
+      "Free Agent",
+      `Play at ${FREE_AGENT_CLUBS} different clubs.`,
+      clubs,
+      FREE_AGENT_CLUBS
+    ),
+    binary(
+      "club-loyalist",
+      "🏡",
+      "Club Loyalist",
+      `Play ${ONE_CLUB_MIN_GAMES}+ games, all at one club.`,
+      isOneClubPlayer(matches)
+    ),
     // --- Gear & setup -------------------------------------------------------
     binary("geared-up", "🎒", "Geared Up", "Register your racket in your profile.", !!ctx?.gear?.racketSlug),
     binary("take-your-side", "🧭", "Take Your Side", "Set your on-court position.", !!ctx?.gear?.position),
@@ -736,6 +801,13 @@ export function computeAchievements(
       "Better Than Econ",
       `Finish an event above ${NAMED_RANK_RIVAL}.`,
       ctx ? outplacedNamedRival(ctx, NAMED_RANK_RIVAL) : false
+    ),
+    binary(
+      "local-legend",
+      "📍",
+      "Local Legend",
+      `Play a game at ${NAMED_LOCATION}.`,
+      playedAtLocation(matches, NAMED_LOCATION)
     ),
     // --- Badges of shame — earned by misfortune, worn with pride -----------
     binary("off-day", "🥶", "Off Day", `Score under ${LOW_SCORE} in a game.`, lowScore !== null && lowScore < LOW_SCORE, "bad"),

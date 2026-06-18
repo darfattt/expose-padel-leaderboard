@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type AchievementContext, WEEKLY_HABIT_WEEKS, computeAchievements } from "./achievements";
+import { type AchievementContext, ONE_CLUB_MIN_GAMES, WEEKLY_HABIT_WEEKS, computeAchievements } from "./achievements";
 import type { MatchHistoryEntry } from "./queries";
 import type { CareerStatRow } from "./types";
 
@@ -158,6 +158,44 @@ describe("computeAchievements — named rivals", () => {
     // If Econ out-scores self, it's not earned.
     const loser = { ...ctx, results: ctx.results!.map((r) => (r.playerId === "self" ? { ...r, points: 1 } : r)) };
     expect(byKey(career(), [], loser).get("econ-beater")!.earned).toBe(false);
+  });
+});
+
+describe("computeAchievements — clubs & locations", () => {
+  it("counts distinct clubs for Club Hopper and Free Agent", () => {
+    const oneClub = [match({ clubId: "a" }), match({ clubId: "a" })];
+    const hopper = byKey(career(), oneClub);
+    expect(hopper.get("club-hopper")!.earned).toBe(false);
+    expect(hopper.get("club-hopper")!.progress).toEqual({ current: 1, target: 2 });
+
+    const twoClubs = byKey(career(), [match({ clubId: "a" }), match({ clubId: "b" })]);
+    expect(twoClubs.get("club-hopper")!.earned).toBe(true);
+    expect(twoClubs.get("free-agent")!.earned).toBe(false);
+
+    const threeClubs = byKey(career(), [match({ clubId: "a" }), match({ clubId: "b" }), match({ clubId: "c" })]);
+    expect(threeClubs.get("free-agent")!.earned).toBe(true);
+  });
+
+  it("falls back to club name when id is absent, and ignores untagged games", () => {
+    const m = byKey(career(), [match({ clubName: "Expose Padel" }), match({})]);
+    expect(m.get("club-hopper")!.progress).toEqual({ current: 1, target: 2 });
+  });
+
+  it("earns Club Loyalist only with enough games all at one club", () => {
+    const loyal = Array.from({ length: ONE_CLUB_MIN_GAMES }, () => match({ clubId: "a" }));
+    expect(byKey(career(), loyal).get("club-loyalist")!.earned).toBe(true);
+    // Same volume but split across two clubs → not a loyalist.
+    const split = loyal.map((m, i) => ({ ...m, clubId: i % 2 ? "a" : "b" }));
+    expect(byKey(career(), split).get("club-loyalist")!.earned).toBe(false);
+    // Too few games → not yet earned.
+    expect(byKey(career(), [match({ clubId: "a" })]).get("club-loyalist")!.earned).toBe(false);
+  });
+
+  it("earns Local Legend on a substring location match (case-insensitive)", () => {
+    const here = [match({ location: "Padel Court — Grand Wisata, Bekasi" })];
+    expect(byKey(career(), here).get("local-legend")!.earned).toBe(true);
+    const elsewhere = [match({ location: "Some Other Venue" })];
+    expect(byKey(career(), elsewhere).get("local-legend")!.earned).toBe(false);
   });
 });
 

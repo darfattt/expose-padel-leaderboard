@@ -23,6 +23,8 @@ export interface MatchHistoryEntry {
   conceded: number;
   result: "W" | "L" | "D";
   pointsPerGame?: number | null; // event scoring basis, for rating normalization (lib/scoring.ts); absent → canonical
+  clubId?: string | null; // club the event belongs to (lib/clubs.ts); absent → unknown/unconfigured
+  clubName?: string | null; // club display name, for club-based achievements
 }
 
 export interface EventRow {
@@ -137,6 +139,17 @@ export async function getPlayerRackets(): Promise<Map<string, PlayerRacket>> {
   }
 }
 
+// Shape of the event embedded in a match-history row (clubs relation typed by
+// Supabase as a possibly-array single row).
+interface RawHistoryEvent {
+  title: string;
+  played_on: string | null;
+  location: string | null;
+  points_per_game: number | null;
+  club_id: string | null;
+  clubs: { name: string } | { name: string }[] | null;
+}
+
 // Full match history for a player: each game with partner, opponents, score,
 // and result, newest event first. Two queries + in-memory grouping (no N+1).
 export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEntry[]> {
@@ -145,7 +158,7 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
     const { data: mine, error: e1 } = await supabase
       .from("match_players")
       .select(
-        "match_id, team, points, conceded, won, is_draw, matches!inner(id, round, court, event_id, events!inner(title, played_on, location, points_per_game))"
+        "match_id, team, points, conceded, won, is_draw, matches!inner(id, round, court, event_id, events!inner(title, played_on, location, points_per_game, club_id, clubs(name)))"
       )
       .eq("player_id", id);
     if (e1) throw e1;
@@ -178,11 +191,11 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         round: number;
         court: number;
         event_id: string;
-        events:
-          | { title: string; played_on: string | null; location: string | null; points_per_game: number | null }
-          | { title: string; played_on: string | null; location: string | null; points_per_game: number | null }[];
+        events: RawHistoryEvent | RawHistoryEvent[];
       };
       const ev = Array.isArray(m.events) ? m.events[0] : m.events;
+      // Supabase types the embedded clubs relation as an array; it's one row here.
+      const club = ev ? (Array.isArray(ev.clubs) ? ev.clubs[0] : ev.clubs) : null;
       // Everyone in the match except the player whose history this is.
       const others = (byMatch.get(r.match_id as string) ?? []).filter(
         (o) => o.name !== undefined && o.playerId !== id
@@ -209,6 +222,8 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         conceded: r.conceded as number,
         result,
         pointsPerGame: ev?.points_per_game ?? null,
+        clubId: ev?.club_id ?? null,
+        clubName: club?.name ?? null,
       };
     });
 
