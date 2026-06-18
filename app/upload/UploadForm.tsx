@@ -226,10 +226,13 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Required to save"
+              placeholder="Club admin or super-admin"
               autoComplete="off"
               className="mt-1 w-full rounded-sm border border-card-border bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none"
             />
+            <span className="mt-1 block text-xs text-body-muted">
+              Use this club’s admin password, or the super-admin password.
+            </span>
           </label>
 
           <div className="mt-6 flex items-center gap-4">

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import UploadForm from "./UploadForm";
 import { getClubs } from "@/lib/clubs";
 
@@ -20,6 +21,13 @@ export default async function UploadPage() {
         Nothing is saved until you confirm the preview.
       </p>
       <UploadForm clubs={clubs} />
+      <p className="text-body-muted text-sm mt-6">
+        Need a new club?{" "}
+        <Link href="/clubs/new" className="text-action-blue hover:underline">
+          Register one
+        </Link>
+        .
+      </p>
     </div>
   );
 }

@@ -71,13 +71,34 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
   const bytes = await readPdf(formData);
   if ("error" in bytes) return { ok: false, error: bytes.error };
 
-  // Verify the upload password (set UPLOAD_PASSWORD in the environment).
-  const requiredPassword = process.env.UPLOAD_PASSWORD;
-  if (!requiredPassword) {
-    return { ok: false, error: "Uploads are disabled — UPLOAD_PASSWORD is not configured." };
+  // Club the scoresheet belongs to (selected in the preview form).
+  const clubId = (formData.get("clubId") as string | null)?.trim() || null;
+
+  // Verify the upload password. Two ways in: the global super-admin password
+  // (UPLOAD_PASSWORD) works for any club, or the selected club's own
+  // admin_password works for that club only.
+  let supabase;
+  try {
+    supabase = createServiceClient();
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
   }
+
   const password = (formData.get("password") as string | null)?.trim() ?? "";
-  if (password !== requiredPassword) {
+  const superPassword = process.env.UPLOAD_PASSWORD;
+  let authorized = !!superPassword && password === superPassword;
+  if (!authorized && password && clubId) {
+    const { data: club } = await supabase
+      .from("clubs")
+      .select("admin_password")
+      .eq("id", clubId)
+      .maybeSingle();
+    authorized = !!club?.admin_password && password === club.admin_password;
+  }
+  if (!authorized) {
+    if (!superPassword) {
+      return { ok: false, error: "Uploads are disabled — UPLOAD_PASSWORD is not configured." };
+    }
     return { ok: false, error: "Incorrect password." };
   }
 
@@ -100,17 +121,7 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
   const editedPpg = Number((formData.get("pointsPerGame") as string | null)?.trim());
   if (Number.isFinite(editedPpg) && editedPpg > 0) parsed.event.pointsPerGame = editedPpg;
 
-  // Club the scoresheet belongs to (selected in the preview form).
-  const clubId = (formData.get("clubId") as string | null)?.trim() || null;
-
   const contentHash = scoresheetHash(parsed);
-
-  let supabase;
-  try {
-    supabase = createServiceClient();
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
 
   // Duplicate guard.
   const { data: existing } = await supabase
