@@ -1,11 +1,17 @@
 import Link from "next/link";
+import PlayerAvatar from "@/app/components/PlayerAvatar";
+import { type Achievement, type AchievementContext, computeAchievements } from "@/lib/achievements";
 import { h2hHook } from "@/lib/gossip";
 import { getLeaderboard, type RankedPlayer } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
-import { getPlayerMatchHistory } from "@/lib/queries";
+import { getPlayerGear, getPlayerMatchHistory, getPlayerReclub, type MatchHistoryEntry } from "@/lib/queries";
+import { avatarFor } from "@/lib/reclub-avatar";
 import { computeForm, headToHead, opponentRecords, type PairRecord } from "@/lib/relationships";
+import { scriptForMatchup } from "@/lib/sim/matchup";
+import type { PlayerGear } from "@/lib/types";
 import { pct, predictMatchup } from "@/lib/versus";
 import CompareRadar from "./CompareRadar";
+import MatchSim from "./MatchSim";
 import FormStrip from "@/app/players/[id]/FormStrip";
 import { GossipLine, RESULT_TEXT, recordLabel, winPct } from "@/app/players/[id]/relationship-ui";
 
@@ -39,7 +45,7 @@ export default async function VersusPage({
       <Picker board={board} aId={playerA?.row.player_id} bId={playerB?.row.player_id} />
 
       {ready ? (
-        <Tape playerA={playerA} playerB={playerB} />
+        <Tape playerA={playerA} playerB={playerB} board={board} />
       ) : board.length < 2 ? (
         <p className="text-body-muted mt-10 text-sm">
           Need at least two players with recorded games. Upload a scoresheet to get started.
@@ -109,12 +115,30 @@ function PlayerSelect({
   );
 }
 
-async function Tape({ playerA, playerB }: { playerA: RankedPlayer; playerB: RankedPlayer }) {
+async function Tape({
+  playerA,
+  playerB,
+  board,
+}: {
+  playerA: RankedPlayer;
+  playerB: RankedPlayer;
+  board: RankedPlayer[];
+}) {
   const aId = playerA.row.player_id;
   const bId = playerB.row.player_id;
-  const [matchesA, matchesB] = await Promise.all([
+  const [matchesA, matchesB, gearA, gearB, reclubA, reclubB] = await Promise.all([
     getPlayerMatchHistory(aId),
     getPlayerMatchHistory(bId),
+    getPlayerGear(aId),
+    getPlayerGear(bId),
+    getPlayerReclub(aId),
+    getPlayerReclub(bId),
+  ]);
+  // Resolve each player's real Reclub photo (stored, else scraped from their
+  // profile) so the sim shows actual faces, not just generated sprites.
+  const [avatarA, avatarB] = await Promise.all([
+    avatarFor(reclubA.url, reclubA.avatarUrl),
+    avatarFor(reclubB.url, reclubB.avatarUrl),
   ]);
 
   const formA = computeForm(matchesA);
@@ -125,6 +149,28 @@ async function Tape({ playerA, playerB }: { playerA: RankedPlayer; playerB: Rank
     games: record.games,
   });
   const common = commonOpponents(matchesA, matchesB, aId, bId);
+
+  // Field context shared by the morale (badge) signal below: who's top-3, and
+  // every player's rating, so the achievement engine can judge upsets/rank.
+  const rankedCount = board.filter((p) => p.rank != null).length;
+  const ratingById = new Map(board.map((p) => [p.row.player_id, p.rating]));
+  const topRankIds = new Set(
+    board.filter((p) => p.rank != null && p.rank <= 3).map((p) => p.row.player_id)
+  );
+
+  // Pixel-art match cartoon. The edge (who's favoured, and the bar's own
+  // prediction) is built server-side from the full picture — rating + h2h, then
+  // attributes, gear, ladder rank, experience, form and earned badges — so all of
+  // those move the sim, not just the rating gap. Replayed by the client <MatchSim>.
+  const script = scriptForMatchup({
+    a: simPlayer(playerA, formWinRate(formA), gearA, matchesA, { ratingById, topRankIds, rankedCount }),
+    b: simPlayer(playerB, formWinRate(formB), gearB, matchesB, { ratingById, topRankIds, rankedCount }),
+    aId,
+    bId,
+    ratingA: playerA.rating,
+    ratingB: playerB.rating,
+    target: prediction.probA,
+  });
 
   return (
     <div className="mt-12">
@@ -173,6 +219,36 @@ async function Tape({ playerA, playerB }: { playerA: RankedPlayer; playerB: Rank
           </p>
         )}
       </div>
+
+      {/* 2D match simulation — the arcade replay of the full-picture edge */}
+      <section className="mt-14">
+        <div className="flex items-baseline justify-between mb-3">
+          <p className="mono-label">The tape · 8-bit replay</p>
+          <span className="text-muted text-xs">
+            {playerA.row.name} &amp; pro vs {playerB.row.name} &amp; pro
+          </span>
+        </div>
+        <MatchSim
+          script={script}
+          nameA={playerA.row.name}
+          nameB={playerB.row.name}
+          avatarA={avatarA}
+          avatarB={avatarB}
+        />
+        {script.edge && (
+          <EdgeBreakdown
+            edge={script.edge}
+            nameA={playerA.row.name}
+            nameB={playerB.row.name}
+          />
+        )}
+        <p className="text-muted text-xs mt-3">
+          The replay weighs more than rating: attributes, gear, ladder rank, experience, recent
+          form and earned badges all tilt the court. Momentum, clutch on the big points and stamina
+          late then shape how each rally plays out — so every <span className="font-medium">Rematch</span>{" "}
+          tells a different story while the odds stay honest.
+        </p>
+      </section>
 
       {/* Attribute overlay */}
       <section className="mt-14">
@@ -308,6 +384,58 @@ function StatLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+// What tilts the court beyond the rating gap. Lists each grounded factor
+// (attributes, gear, ladder, experience, form, badges) and the percentage points
+// it added to — or took from — team A's simulated win chance. Green favours A,
+// coral favours B; the headline shows the start (rating + h2h) and the end.
+function EdgeBreakdown({
+  edge,
+  nameA,
+  nameB,
+}: {
+  edge: NonNullable<ReturnType<typeof scriptForMatchup>["edge"]>;
+  nameA: string;
+  nameB: string;
+}) {
+  const movers = edge.factors.filter((f) => Math.abs(f.delta) >= 0.1);
+  return (
+    <div className="mt-4 card p-5">
+      <div className="flex items-baseline justify-between mb-3">
+        <p className="mono-label">What tilts the court</p>
+        <span className="text-muted text-xs tabular-nums">
+          rating {pct(edge.baseTarget)}% → sim {pct(edge.target)}%{" "}
+          <span className="text-deep-green">{nameA}</span>
+        </span>
+      </div>
+      {movers.length === 0 ? (
+        <p className="text-body-muted text-sm">
+          Dead level beyond the rating — nothing in the gear, ladder, mileage, form or badges
+          separates {nameA} and {nameB}.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {movers.map((f) => {
+            const favoursA = f.delta >= 0;
+            return (
+              <li key={f.key} className="grid grid-cols-[5.5rem_1fr_3.5rem] items-center gap-3 text-sm">
+                <span className="mono-label">{f.label}</span>
+                <span className="text-body-muted truncate">{f.detail}</span>
+                <span
+                  className="text-right font-medium tabular-nums"
+                  style={{ color: favoursA ? "#0a6b56" : "#d6502f" }}
+                >
+                  {favoursA ? "+" : ""}
+                  {f.delta.toFixed(1)}%
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SharedGames({
   games,
   playerName,
@@ -355,6 +483,64 @@ function SharedGames({
       </div>
     </div>
   );
+}
+
+// Recent win rate from the form strip (wins / games shown), 0.5 when there's no
+// recent history to read — the neutral value the edge model expects.
+function formWinRate(form: ReturnType<typeof computeForm>): number {
+  if (!form.recent.length) return 0.5;
+  const wins = form.recent.filter((r) => r === "W").length;
+  return wins / form.recent.length;
+}
+
+// A signed "morale" from the player's badge wall: earned good badges minus earned
+// shame badges. Built from the same computeAchievements the profile uses, with a
+// light field context (rank, ratings, top-3, gear) so the field-relative badges
+// can fire. A decorated player carries confidence into the cartoon; a pile of
+// shame drags. Field-heavy badges that need full results simply stay unearned.
+function badgeMorale(
+  player: RankedPlayer,
+  matches: MatchHistoryEntry[],
+  gear: PlayerGear,
+  field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number }
+): number {
+  const ctx: AchievementContext = {
+    rank: player.rank,
+    topRankIds: field.topRankIds,
+    ratingById: field.ratingById,
+    selfRating: player.rating,
+    selfId: player.row.player_id,
+    consistency: player.attributes.consistency,
+    gear,
+  };
+  const earned: Achievement[] = computeAchievements(player.row, matches, ctx).filter((a) => a.earned);
+  const good = earned.filter((a) => a.tone === "good").length;
+  const bad = earned.filter((a) => a.tone === "bad").length;
+  return good - bad;
+}
+
+// Assemble the grounded TeamPlayer the sim consumes: identity + attributes, plus
+// the rich signals (ladder rank, career mileage, recent form, badge morale, gear)
+// that tilt the simulated edge beyond the rating gap.
+function simPlayer(
+  player: RankedPlayer,
+  form: number,
+  gear: PlayerGear,
+  matches: MatchHistoryEntry[],
+  field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number }
+) {
+  return {
+    name: player.row.name,
+    rating: player.rating,
+    attributes: player.attributes,
+    archetypePrimary: player.archetype.primary,
+    hasRacket: Boolean(gear.racketName),
+    rank: player.rank,
+    fieldSize: field.rankedCount,
+    experienceGames: player.row.games,
+    form,
+    morale: badgeMorale(player, matches, gear, field),
+  };
 }
 
 // Opponents both players have faced, with each player's record against them.
