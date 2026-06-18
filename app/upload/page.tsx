@@ -24,7 +24,7 @@ export default async function UploadPage() {
       <p className="text-body-muted text-sm mt-6">
         Need a new club?{" "}
         <Link href="/clubs/new" className="text-action-blue hover:underline">
-          Register one
+          Ask the admin
         </Link>
         .
       </p>

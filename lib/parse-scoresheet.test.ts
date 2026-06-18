@@ -1,7 +1,30 @@
 import { describe, it, expect } from "vitest";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { parseScoresheet } from "./parse-scoresheet";
+import { cleanName, parseScoresheet } from "./parse-scoresheet";
+
+describe("cleanName", () => {
+  it("joins a name whose letters were spaced apart", () => {
+    expect(cleanName("S Y A F I K")).toBe("SYAFIK");
+  });
+
+  it("joins a spaced first name but leaves a normal surname intact", () => {
+    expect(cleanName("S Y A F I K Putra")).toBe("SYAFIK Putra");
+  });
+
+  it("preserves a lone middle initial between real words", () => {
+    expect(cleanName("Juan M Lebron")).toBe("Juan M Lebron");
+  });
+
+  it("leaves ordinary names untouched and preserves case", () => {
+    expect(cleanName("Faisal")).toBe("Faisal");
+    expect(cleanName("Joao Pedro")).toBe("Joao Pedro");
+  });
+
+  it("collapses redundant whitespace", () => {
+    expect(cleanName("  Joao   Pedro ")).toBe("Joao Pedro");
+  });
+});
 
 async function findPdf(): Promise<string> {
   // Sample scoresheets live in the project root or in source_pdf/.

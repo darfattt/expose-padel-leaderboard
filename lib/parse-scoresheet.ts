@@ -28,6 +28,34 @@ function isInt(s: string): boolean {
   return INT_RE.test(s.trim());
 }
 
+// A player name can reach us with its letters spaced apart ("S Y A F I K") —
+// either pdfjs handed us one fragment that already contains the spaces, or the
+// glyphs sat too far apart for coalesceItems to merge. Join runs of 2+ single
+// letters back into one word so the stored name reads "SYAFIK". A lone initial
+// between real words ("Juan M Lebron") is a run of one and stays untouched.
+// Case is preserved — this only removes the spurious spacing.
+export function cleanName(raw: string): string {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return collapsed;
+  const out: string[] = [];
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length >= 2) out.push(run.join(""));
+    else if (run.length === 1) out.push(run[0]);
+    run = [];
+  };
+  for (const token of collapsed.split(" ")) {
+    if (/^\p{L}$/u.test(token)) {
+      run.push(token);
+    } else {
+      flush();
+      out.push(token);
+    }
+  }
+  flush();
+  return out.join(" ");
+}
+
 function courtNumber(s: string): number | null {
   const m = s.trim().match(/court\s*(\d+)/i);
   return m ? parseInt(m[1], 10) : null;
@@ -97,7 +125,7 @@ function parseColumn(items: TextItem[]): Column {
     const s = it.str.trim();
     if (!s || ROUND_WORD_RE.test(s)) continue;
     if (isInt(s)) scores.push(parseInt(s, 10));
-    else names.push(s.replace(/\s+/g, " "));
+    else names.push(cleanName(s));
   }
   return {
     team1: names.slice(0, 2),

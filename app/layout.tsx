@@ -15,7 +15,10 @@ const sans = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "expose.padelleaderboard",
+  title: {
+    default: "Padel Leaderboard",
+    template: "%s · Padel Leaderboard",
+  },
   description: "Upload a Reclub scoresheet, get a live padel leaderboard, player profiles, and AI Player Reports.",
 };
 
