@@ -2,24 +2,20 @@
 
 import { useState, useTransition } from "react";
 import { updateReclubProfile } from "@/app/actions/reclub";
-import PlayerAvatar from "@/app/components/PlayerAvatar";
 import { reclubHandle } from "@/lib/reclub";
 import type { PlayerReclub } from "@/lib/queries";
 
-// Header-embedded Reclub profile: shows the player's avatar + @handle, expanding
-// into an inline editor (paste a profile URL) when editing. Saving resolves the
-// avatar server-side so the circle fills in immediately.
+// Header-embedded Reclub link: shows the player's @handle and expands into an
+// inline editor (paste a profile URL) when editing. The avatar itself lives
+// beside the player's name; saving here revalidates the page so it refreshes.
 export default function ReclubCard({
   playerId,
-  name,
   initial,
 }: {
   playerId: string;
-  name: string;
   initial: PlayerReclub;
 }) {
   const [url, setUrl] = useState<string | null>(initial.url);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(initial.avatarUrl);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initial.url ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +32,6 @@ export default function ReclubCard({
         return;
       }
       setUrl(res.url ?? null);
-      setAvatarUrl(res.avatarUrl ?? null);
       setDraft(res.url ?? "");
       setEditing(false);
     });
@@ -98,7 +93,6 @@ export default function ReclubCard({
 
   return (
     <div className="flex items-end gap-3">
-      <PlayerAvatar name={name} avatarUrl={avatarUrl} size={64} />
       <div className="min-w-0">
         <p className="mono-label">Reclub</p>
         {handle ? (
