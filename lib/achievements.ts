@@ -591,7 +591,8 @@ export function computeAchievements(
       "🎓",
       "Certified",
       "Clear every reliability gate — prove out the full 0–7 ladder.",
-      reliabilityCap({ score: row.point_diff, wins: row.wins }) >= MAX_RATING
+      // Normalized net points (lib/scoring.ts) so this matches the rating's gate.
+      reliabilityCap({ score: row.norm_point_diff ?? row.point_diff, wins: row.wins }) >= MAX_RATING
     ),
     // --- Streaks & skill ----------------------------------------------------
     countBadge("hot-streak", "🔥", "Hot Streak", "Win 5 games in a row.", longestWinStreak, 5),

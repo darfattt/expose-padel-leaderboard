@@ -144,7 +144,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
       {/* Reliability gate: shown only while it actively caps the *skill* rating
           (the pre-rust base), so inactivity rust never masks an earned gate. */}
-      <ReliabilityGate score={r.point_diff} wins={r.wins} rating={player.baseRating} />
+      <ReliabilityGate score={r.norm_point_diff ?? r.point_diff} wins={r.wins} rating={player.baseRating} />
 
       {/* Recent form + gossip hooks (deterministic one-liner + LLM column) */}
       {form.recent.length > 0 || venueGossip ? (

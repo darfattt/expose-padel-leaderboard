@@ -22,6 +22,7 @@ export interface MatchHistoryEntry {
   points: number;
   conceded: number;
   result: "W" | "L" | "D";
+  pointsPerGame?: number | null; // event scoring basis, for rating normalization (lib/scoring.ts); absent → canonical
 }
 
 export interface EventRow {
@@ -144,7 +145,7 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
     const { data: mine, error: e1 } = await supabase
       .from("match_players")
       .select(
-        "match_id, team, points, conceded, won, is_draw, matches!inner(id, round, court, event_id, events!inner(title, played_on, location))"
+        "match_id, team, points, conceded, won, is_draw, matches!inner(id, round, court, event_id, events!inner(title, played_on, location, points_per_game))"
       )
       .eq("player_id", id);
     if (e1) throw e1;
@@ -178,8 +179,8 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         court: number;
         event_id: string;
         events:
-          | { title: string; played_on: string | null; location: string | null }
-          | { title: string; played_on: string | null; location: string | null }[];
+          | { title: string; played_on: string | null; location: string | null; points_per_game: number | null }
+          | { title: string; played_on: string | null; location: string | null; points_per_game: number | null }[];
       };
       const ev = Array.isArray(m.events) ? m.events[0] : m.events;
       // Everyone in the match except the player whose history this is.
@@ -207,6 +208,7 @@ export async function getPlayerMatchHistory(id: string): Promise<MatchHistoryEnt
         points: r.points as number,
         conceded: r.conceded as number,
         result,
+        pointsPerGame: ev?.points_per_game ?? null,
       };
     });
 

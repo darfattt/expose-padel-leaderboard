@@ -1,4 +1,5 @@
 import type { RankedPlayer } from "./leaderboard";
+import { normFactor } from "./scoring";
 import type { CareerStatRow } from "./types";
 
 // One match-player fact pulled raw from the DB (no aggregation). The leaderboard
@@ -14,6 +15,7 @@ export interface RawResult {
   isDraw: boolean;
   eventId: string;
   playedOn: string | null; // ISO date (yyyy-mm-dd) or null when the event is undated
+  pointsPerGame?: number | null; // event scoring basis for normalization (see lib/scoring.ts); null/absent → canonical
 }
 
 // Aggregate raw results into per-player career rows, mirroring the
@@ -37,6 +39,14 @@ export function aggregateResults(results: RawResult[]): CareerStatRow[] {
     let closeGames = 0;
     let closeWins = 0;
     const ownPoints: number[] = [];
+    // Scoring-basis-normalized parallels (every game scaled to a 21-point
+    // equivalent) so the rating layer can compare events on different scales.
+    // Must mirror the SQL views' norm_* columns (see supabase migrations).
+    let normPointsFor = 0;
+    let normPointsAgainst = 0;
+    let normCloseGames = 0;
+    let normCloseWins = 0;
+    const normOwnPoints: number[] = [];
     for (const r of rs) {
       pointsFor += r.points;
       pointsAgainst += r.conceded;
@@ -48,6 +58,17 @@ export function aggregateResults(results: RawResult[]): CareerStatRow[] {
         if (r.won) closeWins += 1;
       }
       ownPoints.push(r.points);
+
+      const f = normFactor(r.pointsPerGame);
+      const np = r.points * f;
+      const nc = r.conceded * f;
+      normPointsFor += np;
+      normPointsAgainst += nc;
+      if (Math.abs(np - nc) <= 3) {
+        normCloseGames += 1;
+        if (r.won) normCloseWins += 1;
+      }
+      normOwnPoints.push(np);
     }
     rows.push({
       player_id: playerId,
@@ -62,6 +83,12 @@ export function aggregateResults(results: RawResult[]): CareerStatRow[] {
       close_games: closeGames,
       close_wins: closeWins,
       score_variance: variancePop(ownPoints),
+      norm_points_for: normPointsFor,
+      norm_points_against: normPointsAgainst,
+      norm_point_diff: normPointsFor - normPointsAgainst,
+      norm_close_games: normCloseGames,
+      norm_close_wins: normCloseWins,
+      norm_score_variance: variancePop(normOwnPoints),
     });
   }
   return rows;

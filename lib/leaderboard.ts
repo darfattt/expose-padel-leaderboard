@@ -85,7 +85,13 @@ export function rankPlayers(rows: CareerStatRow[], decay?: DecayInput): RankedPl
 
   const enriched = played.map((row, i): Omit<RankedPlayer, "rank"> => {
     const m = metrics[i];
-    const baseRating = computeRating(m, ratingField, { score: row.point_diff, wins: row.wins });
+    // Gate on scoring-basis-normalized net points (falls back to raw when
+    // unnormalized) so the absolute reliability bars mean the same thing across
+    // "to 5" and "to 21" events. See lib/scoring.ts.
+    const baseRating = computeRating(m, ratingField, {
+      score: row.norm_point_diff ?? row.point_diff,
+      wins: row.wins,
+    });
     const daysInactive = decay
       ? inactivityDays(decay.lastPlayedById.get(row.player_id) ?? null, decay.asOf)
       : null;
@@ -182,7 +188,7 @@ export async function fetchRawResults(clubId?: string): Promise<RawResult[]> {
     let query = supabase
       .from("match_players")
       .select(
-        "player_id, points, conceded, won, is_draw, players!inner(name), matches!inner(event_id, events!inner(played_on, club_id))"
+        "player_id, points, conceded, won, is_draw, players!inner(name), matches!inner(event_id, events!inner(played_on, club_id, points_per_game))"
       );
     if (clubId) query = query.eq("matches.events.club_id", clubId);
     const { data, error } = await query;
@@ -200,6 +206,7 @@ export async function fetchRawResults(clubId?: string): Promise<RawResult[]> {
         isDraw: r.is_draw as boolean,
         eventId: match.event_id as string,
         playedOn: (ev as { played_on: string | null })?.played_on ?? null,
+        pointsPerGame: (ev as { points_per_game: number | null })?.points_per_game ?? null,
       };
     });
   } catch {

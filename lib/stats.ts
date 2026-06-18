@@ -11,14 +11,24 @@ export interface PlayerMetrics {
 
 export function computeMetrics(row: CareerStatRow): PlayerMetrics {
   const g = Math.max(row.games, 1);
-  const close = row.close_games;
+  // Per-game rates are field-relative (z-scored downstream), so they read the
+  // scoring-basis-normalized aggregates when present — that keeps events on
+  // different point scales comparable. Falls back to the raw field (factor 1)
+  // for hand-built rows / pre-normalization data. Win rate is count-based, so
+  // it's already scale-free. See lib/scoring.ts.
+  const pointsFor = row.norm_points_for ?? row.points_for;
+  const pointsAgainst = row.norm_points_against ?? row.points_against;
+  const pointDiff = row.norm_point_diff ?? row.point_diff;
+  const closeGames = row.norm_close_games ?? row.close_games;
+  const closeWins = row.norm_close_wins ?? row.close_wins;
+  const variance = row.norm_score_variance ?? row.score_variance;
   return {
     winRate: row.wins / g,
-    ppg: row.points_for / g,
-    concededPg: row.points_against / g,
-    diffPg: row.point_diff / g,
-    closeWinRate: close > 0 ? row.close_wins / close : 0.5,
-    variance: row.score_variance,
+    ppg: pointsFor / g,
+    concededPg: pointsAgainst / g,
+    diffPg: pointDiff / g,
+    closeWinRate: closeGames > 0 ? closeWins / closeGames : 0.5,
+    variance,
   };
 }
 

@@ -95,6 +95,11 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
   const editedDate = (formData.get("playedOn") as string | null)?.trim();
   if (editedDate) parsed.event.playedOn = editedDate;
 
+  // Scoring basis (points per game) — detected by the parser, confirmable/
+  // overridable in the preview form. Drives rating normalization (lib/scoring.ts).
+  const editedPpg = Number((formData.get("pointsPerGame") as string | null)?.trim());
+  if (Number.isFinite(editedPpg) && editedPpg > 0) parsed.event.pointsPerGame = editedPpg;
+
   // Club the scoresheet belongs to (selected in the preview form).
   const clubId = (formData.get("clubId") as string | null)?.trim() || null;
 
@@ -127,6 +132,7 @@ export async function saveScoresheet(formData: FormData): Promise<SaveResult> {
       format: event.format,
       num_courts: event.numCourts,
       num_players: event.numPlayers,
+      points_per_game: event.pointsPerGame ?? 21,
       club_id: clubId,
       source_filename: (formData.get("file") as File).name,
       content_hash: contentHash,

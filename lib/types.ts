@@ -16,6 +16,7 @@ export interface ParsedEvent {
   format: string | null;
   numCourts: number | null;
   numPlayers: number | null;
+  pointsPerGame: number | null; // detected scoring basis (e.g. 21, or 5 for a fixed-sum "to 5"); see lib/scoring.ts
 }
 
 export interface ParsedScoresheet {
@@ -70,4 +71,15 @@ export interface CareerStatRow {
   close_games: number; // games decided by margin <= 3
   close_wins: number;
   score_variance: number; // variance of own per-game points
+  // Scoring-basis-normalized aggregates (every game scaled to a 21-point
+  // equivalent; see lib/scoring.ts). The rating layer reads these so events on
+  // different scales (e.g. "to 5" vs "to 21") are comparable; the raw fields
+  // above stay verbatim for display. Optional — absent for hand-built rows and
+  // pre-normalization data, where callers fall back to the raw field (factor 1).
+  norm_points_for?: number;
+  norm_points_against?: number;
+  norm_point_diff?: number; // cumulative normalized net points (feeds the reliability gate)
+  norm_close_games?: number;
+  norm_close_wins?: number;
+  norm_score_variance?: number;
 }

@@ -78,7 +78,9 @@ export function buildReportFacts(input: ReportInput): string {
   // Reliability framing: this league only trusts a high level once it's earned on
   // net points + wins (see lib/rating.ts), so a hot streak can't fake an Elite
   // rating. Surface where the player sits relative to that gate.
-  const reliability = { score: r.point_diff, wins: r.wins };
+  // Normalized net points (lib/scoring.ts) so the reliability framing matches
+  // the player's actual (normalized) rating across different scoring scales.
+  const reliability = { score: r.norm_point_diff ?? r.point_diff, wins: r.wins };
   const cap = reliabilityCap(reliability);
   const gate = nextReliabilityGate(reliability);
   const capped = gate !== null && player.rating >= cap - 1e-9;

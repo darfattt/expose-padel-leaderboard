@@ -1,5 +1,6 @@
 import type { MatchHistoryEntry } from "./queries";
 import { type RatingField, computeRating } from "./rating";
+import { normFactor } from "./scoring";
 import { computeMetrics } from "./stats";
 import type { CareerStatRow } from "./types";
 
@@ -58,6 +59,14 @@ export function buildRatingHistory(
   let closeGames = 0;
   let closeWins = 0;
   const ownPoints: number[] = [];
+  // Scoring-basis-normalized parallels so each snapshot's rating matches the
+  // (normalized) headline rating, even across events on different point scales.
+  // Mirrors aggregateResults / the SQL views (see lib/scoring.ts).
+  let normPointsFor = 0;
+  let normPointsAgainst = 0;
+  let normCloseGames = 0;
+  let normCloseWins = 0;
+  const normOwnPoints: number[] = [];
   const history: RatingHistoryPoint[] = [];
 
   for (const [eventId, ev] of events) {
@@ -73,6 +82,17 @@ export function buildRatingHistory(
         if (m.result === "W") closeWins += 1;
       }
       ownPoints.push(m.points);
+
+      const f = normFactor(m.pointsPerGame);
+      const np = m.points * f;
+      const nc = m.conceded * f;
+      normPointsFor += np;
+      normPointsAgainst += nc;
+      if (Math.abs(np - nc) <= 3) {
+        normCloseGames += 1;
+        if (m.result === "W") normCloseWins += 1;
+      }
+      normOwnPoints.push(np);
     }
     const row: CareerStatRow = {
       player_id: player.id,
@@ -87,12 +107,18 @@ export function buildRatingHistory(
       close_games: closeGames,
       close_wins: closeWins,
       score_variance: variancePop(ownPoints),
+      norm_points_for: normPointsFor,
+      norm_points_against: normPointsAgainst,
+      norm_point_diff: normPointsFor - normPointsAgainst,
+      norm_close_games: normCloseGames,
+      norm_close_wins: normCloseWins,
+      norm_score_variance: variancePop(normOwnPoints),
     };
     history.push({
       eventId,
       eventTitle: ev.title,
       playedOn: ev.playedOn,
-      rating: computeRating(computeMetrics(row), field, { score: pointsFor - pointsAgainst, wins }),
+      rating: computeRating(computeMetrics(row), field, { score: normPointsFor - normPointsAgainst, wins }),
       games,
     });
   }

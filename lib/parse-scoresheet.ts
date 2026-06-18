@@ -1,3 +1,4 @@
+import { detectPointsPerGame } from "./scoring";
 import type { ParsedEvent, ParsedMatch, ParsedScoresheet } from "./types";
 
 // A single positioned text fragment from a PDF page.
@@ -173,6 +174,7 @@ function parseMeta(
     format,
     numCourts,
     numPlayers,
+    pointsPerGame: matches.length ? detectPointsPerGame(matches) : null,
     ...(sourceFilename ? {} : {}),
   };
 }

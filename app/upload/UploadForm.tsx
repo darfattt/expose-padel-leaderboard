@@ -16,6 +16,7 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
   const [dragOver, setDragOver] = useState(false);
   const [title, setTitle] = useState("");
   const [playedOn, setPlayedOn] = useState("");
+  const [pointsPerGame, setPointsPerGame] = useState(21);
   const [password, setPassword] = useState("");
   const [clubId, setClubId] = useState(defaultClubId);
   const [isPreviewing, startPreview] = useTransition();
@@ -35,6 +36,7 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
       if (res.parsed) {
         setTitle(res.parsed.event.title ?? "");
         setPlayedOn(res.parsed.event.playedOn ?? "");
+        setPointsPerGame(res.parsed.event.pointsPerGame ?? 21);
       }
       setPreview(res);
     });
@@ -50,6 +52,7 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
     fd.append("file", file);
     fd.append("title", title.trim());
     fd.append("playedOn", playedOn.trim());
+    fd.append("pointsPerGame", String(pointsPerGame));
     fd.append("clubId", clubId);
     fd.append("password", password);
     startSave(async () => {
@@ -67,7 +70,9 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
 
   const parsed = preview?.parsed;
   const warnings = parsed?.warnings ?? [];
-  const badSums = parsed?.matches.filter((m) => m.team1Score + m.team2Score !== 21).length ?? 0;
+  // A score above the per-game basis is impossible in either format (fixed-sum
+  // or first-to-N) — flags a misread sheet or a wrong basis.
+  const badSums = parsed?.matches.filter((m) => Math.max(m.team1Score, m.team2Score) > pointsPerGame).length ?? 0;
   const playerCount = parsed
     ? new Set(parsed.matches.flatMap((m) => [...m.team1, ...m.team2].map((n) => n.toLowerCase().trim())))
         .size
@@ -140,21 +145,36 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
             <p className="text-body-muted text-sm mt-2">{parsed.event.location}</p>
           )}
 
-          <label className="mt-4 block max-w-xs">
-            <span className="mono-label">Club</span>
-            <select
-              value={clubId}
-              onChange={(e) => setClubId(e.target.value)}
-              className="mt-1 w-full rounded-sm border border-card-border bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none"
-            >
-              {clubs.length === 0 && <option value="">No clubs configured</option>}
-              {clubs.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 max-w-xl">
+            <label className="block">
+              <span className="mono-label">Club</span>
+              <select
+                value={clubId}
+                onChange={(e) => setClubId(e.target.value)}
+                className="mt-1 w-full rounded-sm border border-card-border bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none"
+              >
+                {clubs.length === 0 && <option value="">No clubs configured</option>}
+                {clubs.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mono-label">Points per game</span>
+              <input
+                type="number"
+                min={1}
+                value={pointsPerGame}
+                onChange={(e) => setPointsPerGame(Math.max(1, Number(e.target.value) || 1))}
+                className="mt-1 w-full rounded-sm border border-card-border bg-white px-3 py-2 font-mono text-sm focus:border-primary focus:outline-none"
+              />
+              <span className="mt-1 block text-xs text-body-muted">
+                Detected from the scores (e.g. 21, or 5 for a “to 5” game). Ratings normalize to this.
+              </span>
+            </label>
+          </div>
 
           <div className="grid grid-cols-3 gap-4 mt-6">
             <Stat label="Matches" value={parsed.matches.length} />
@@ -168,7 +188,9 @@ export default function UploadForm({ clubs }: { clubs: Club[] }) {
                 <li className="text-coral">⚠ Already uploaded — saving will be blocked.</li>
               )}
               {badSums > 0 && (
-                <li className="text-coral">⚠ {badSums} match(es) don&apos;t sum to 21.</li>
+                <li className="text-coral">
+                  ⚠ {badSums} match(es) have a score above {pointsPerGame} — check the points-per-game setting.
+                </li>
               )}
               {warnings.map((w, i) => (
                 <li key={i} className="text-body-muted">
