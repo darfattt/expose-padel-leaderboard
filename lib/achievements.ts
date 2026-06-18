@@ -158,6 +158,10 @@ export interface AchievementContext {
   consistency?: number;
   // The player's saved gear/position (racket + on-court side) for the gear badges.
   gear?: PlayerGear;
+  // Whether the player has linked a Reclub profile. With a racket and a position
+  // set, this unlocks the match simulation (see app/versus), so it gates the
+  // "Simulation Ready" badge. Omitted/false → that badge stays locked.
+  reclubLinked?: boolean;
   // Every player's racket (this one included), so gear badges can compare across
   // the field: rarest racket, most popular, priciest. Identity fields (brand /
   // name / slug) drive the rarity badges; the optional shape / price catalogue
@@ -786,6 +790,13 @@ export function computeAchievements(
       "Fully Kitted",
       "Complete your profile — racket and position both set.",
       !!ctx?.gear?.racketSlug && !!ctx?.gear?.position
+    ),
+    binary(
+      "simulation-ready",
+      "🎮",
+      "Simulation Ready",
+      "Set your racket and position, then link a Reclub profile — step on court in the match sim.",
+      !!ctx?.gear?.racketSlug && !!ctx?.gear?.position && !!ctx?.reclubLinked
     ),
     // --- Gear vs the field --------------------------------------------------
     binary("one-of-a-kind", "🦄", "One of a Kind", "Wield a racket no one else in the league uses.", uniqueGear),

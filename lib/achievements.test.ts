@@ -480,10 +480,23 @@ describe("computeAchievements — gear & setup", () => {
     expect(byKey(career(), [], ctx({ ...fullGear, racketSlug: null })).get("fully-kitted")!.earned).toBe(false);
   });
 
+  it("earns Simulation Ready only with racket, position, and a linked Reclub profile", () => {
+    const ready = (gear: AchievementContext["gear"], reclubLinked: boolean): AchievementContext => ({
+      ...ctx(gear),
+      reclubLinked,
+    });
+    expect(byKey(career(), [], ready(fullGear, true)).get("simulation-ready")!.earned).toBe(true);
+    // Each missing piece keeps it locked.
+    expect(byKey(career(), [], ready(fullGear, false)).get("simulation-ready")!.earned).toBe(false);
+    expect(byKey(career(), [], ready({ ...fullGear, position: null }, true)).get("simulation-ready")!.earned).toBe(false);
+    expect(byKey(career(), [], ready({ ...fullGear, racketSlug: null }, true)).get("simulation-ready")!.earned).toBe(false);
+  });
+
   it("reports gear badges unearned without context", () => {
     const m = byKey(career(), []);
     expect(m.get("geared-up")!.earned).toBe(false);
     expect(m.get("fully-kitted")!.earned).toBe(false);
+    expect(m.get("simulation-ready")!.earned).toBe(false);
   });
 });
 

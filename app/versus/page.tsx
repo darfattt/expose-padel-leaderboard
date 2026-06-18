@@ -4,7 +4,14 @@ import { type Achievement, type AchievementContext, computeAchievements } from "
 import { h2hHook } from "@/lib/gossip";
 import { getLeaderboard, type RankedPlayer } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
-import { getPlayerGear, getPlayerMatchHistory, getPlayerReclub, type MatchHistoryEntry } from "@/lib/queries";
+import {
+  getPlayerGear,
+  getPlayerMatchHistory,
+  getPlayerRackets,
+  getPlayerReclub,
+  getPlayerReclubProfiles,
+  type MatchHistoryEntry,
+} from "@/lib/queries";
 import { avatarFor } from "@/lib/reclub-avatar";
 import { computeForm, headToHead, opponentRecords, type PairRecord } from "@/lib/relationships";
 import { scriptForMatchup } from "@/lib/sim/matchup";
@@ -23,10 +30,27 @@ export default async function VersusPage({
   searchParams: Promise<{ a?: string; b?: string }>;
 }) {
   const { a: aId, b: bId } = await searchParams;
-  const board = await getLeaderboard();
+  const [board, rackets, reclubProfiles] = await Promise.all([
+    getLeaderboard(),
+    getPlayerRackets(),
+    getPlayerReclubProfiles(),
+  ]);
+  // Only players who have both set their gear (a racket) and linked a Reclub
+  // profile may run the simulation — the sim leans on real gear and faces.
+  const isEligible = (id: string) => rackets.has(id) && reclubProfiles.has(id);
+  const eligible = board.filter((p) => isEligible(p.row.player_id));
+
   const playerA = aId ? board.find((p) => p.row.player_id === aId) ?? null : null;
   const playerB = bId ? board.find((p) => p.row.player_id === bId) ?? null : null;
-  const ready = playerA && playerB && playerA.row.player_id !== playerB.row.player_id;
+  // A chosen player who isn't eligible blocks the tape and earns an explanation.
+  const ineligible = [playerA, playerB].filter(
+    (p): p is RankedPlayer => p != null && !isEligible(p.row.player_id)
+  );
+  const ready =
+    playerA &&
+    playerB &&
+    playerA.row.player_id !== playerB.row.player_id &&
+    ineligible.length === 0;
 
   return (
     <div>
@@ -42,13 +66,20 @@ export default async function VersusPage({
         </p>
       </section>
 
-      <Picker board={board} aId={playerA?.row.player_id} bId={playerB?.row.player_id} />
+      <Picker board={eligible} aId={playerA?.row.player_id} bId={playerB?.row.player_id} />
 
       {ready ? (
         <Tape playerA={playerA} playerB={playerB} board={board} />
-      ) : board.length < 2 ? (
+      ) : ineligible.length > 0 ? (
         <p className="text-body-muted mt-10 text-sm">
-          Need at least two players with recorded games. Upload a scoresheet to get started.
+          {ineligible.map((p) => p.row.name).join(" and ")}{" "}
+          {ineligible.length > 1 ? "aren't" : "isn't"} ready for the simulation yet — a player needs
+          both a racket and a linked Reclub profile on their page before they can step on court.
+        </p>
+      ) : eligible.length < 2 ? (
+        <p className="text-body-muted mt-10 text-sm">
+          Need at least two players with a racket and a linked Reclub profile. Set gear and link
+          Reclub on the player pages to unlock the simulation.
         </p>
       ) : (
         <p className="text-body-muted mt-10 text-sm">
@@ -163,8 +194,8 @@ async function Tape({
   // attributes, gear, ladder rank, experience, form and earned badges — so all of
   // those move the sim, not just the rating gap. Replayed by the client <MatchSim>.
   const script = scriptForMatchup({
-    a: simPlayer(playerA, formWinRate(formA), gearA, matchesA, { ratingById, topRankIds, rankedCount }),
-    b: simPlayer(playerB, formWinRate(formB), gearB, matchesB, { ratingById, topRankIds, rankedCount }),
+    a: simPlayer(playerA, formWinRate(formA), gearA, matchesA, { ratingById, topRankIds, rankedCount }, !!reclubA.url),
+    b: simPlayer(playerB, formWinRate(formB), gearB, matchesB, { ratingById, topRankIds, rankedCount }, !!reclubB.url),
     aId,
     bId,
     ratingA: playerA.rating,
@@ -502,7 +533,8 @@ function badgeMorale(
   player: RankedPlayer,
   matches: MatchHistoryEntry[],
   gear: PlayerGear,
-  field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number }
+  field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number },
+  reclubLinked: boolean
 ): number {
   const ctx: AchievementContext = {
     rank: player.rank,
@@ -512,6 +544,7 @@ function badgeMorale(
     selfId: player.row.player_id,
     consistency: player.attributes.consistency,
     gear,
+    reclubLinked,
   };
   const earned: Achievement[] = computeAchievements(player.row, matches, ctx).filter((a) => a.earned);
   const good = earned.filter((a) => a.tone === "good").length;
@@ -527,7 +560,8 @@ function simPlayer(
   form: number,
   gear: PlayerGear,
   matches: MatchHistoryEntry[],
-  field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number }
+  field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number },
+  reclubLinked: boolean
 ) {
   return {
     name: player.row.name,
@@ -539,7 +573,7 @@ function simPlayer(
     fieldSize: field.rankedCount,
     experienceGames: player.row.games,
     form,
-    morale: badgeMorale(player, matches, gear, field),
+    morale: badgeMorale(player, matches, gear, field, reclubLinked),
   };
 }
 

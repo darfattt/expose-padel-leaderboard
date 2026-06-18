@@ -102,6 +102,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
     results,
     consistency: player.attributes.consistency,
     gear,
+    reclubLinked: !!reclub.url,
     fieldRackets,
     playStyle: racketPlayStyle(player.attributes),
   });
