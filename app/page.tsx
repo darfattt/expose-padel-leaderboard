@@ -1,7 +1,10 @@
 import Link from "next/link";
+import PlayerAvatar from "@/app/components/PlayerAvatar";
 import { getLeaderboardView } from "@/lib/leaderboard";
 import { getClubs } from "@/lib/clubs";
 import { levelForRating } from "@/lib/levels";
+import { getPlayerReclubProfiles } from "@/lib/queries";
+import { avatarFor } from "@/lib/reclub-avatar";
 import { formatMonth, type RankedPlayerWithChange } from "@/lib/standings";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +20,18 @@ export default async function LeaderboardPage({
   const { board, months, period } = await getLeaderboardView(activeClub?.id, periodParam);
   const ranked = board.filter((p) => !p.provisional);
   const provisional = board.filter((p) => p.provisional);
+
+  // Resolve a Reclub avatar per player (stored value, or read live off the
+  // profile page — cached daily). Players without a link map to null → initials.
+  const profiles = await getPlayerReclubProfiles();
+  const avatars = new Map(
+    await Promise.all(
+      board.map(async (p) => {
+        const prof = profiles.get(p.row.player_id);
+        return [p.row.player_id, prof ? await avatarFor(prof.url, prof.avatarUrl) : null] as const;
+      })
+    )
+  );
 
   // Carry the active club through period links (and vice-versa).
   const withClub = (params: Record<string, string>) => {
@@ -68,11 +83,11 @@ export default async function LeaderboardPage({
         <EmptyState monthly={period !== "all"} />
       ) : (
         <>
-          <Board rows={ranked} />
+          <Board rows={ranked} avatars={avatars} />
           {provisional.length > 0 && (
             <section className="mt-12">
               <p className="mono-label mb-3">Provisional · fewer than 3 games</p>
-              <Board rows={provisional} provisional />
+              <Board rows={provisional} avatars={avatars} provisional />
             </section>
           )}
         </>
@@ -83,9 +98,11 @@ export default async function LeaderboardPage({
 
 function Board({
   rows,
+  avatars,
   provisional = false,
 }: {
   rows: RankedPlayerWithChange[];
+  avatars: Map<string, string | null>;
   provisional?: boolean;
 }) {
   const cols =
@@ -119,7 +136,10 @@ function Board({
             <span>
               <RankChange delta={p.rankDelta} isNew={p.isNew} />
             </span>
-            <span className="font-display text-lg tracking-tight">{p.row.name}</span>
+            <span className="flex items-center gap-2.5 min-w-0">
+              <PlayerAvatar name={p.row.name} avatarUrl={avatars.get(p.row.player_id) ?? null} size={32} />
+              <span className="font-display text-lg tracking-tight truncate">{p.row.name}</span>
+            </span>
             <span className="text-right font-mono text-lg tabular-nums">
               {p.rating.toFixed(1)}
               <RustMark penalty={p.ratingPenalty} days={p.daysInactive} />

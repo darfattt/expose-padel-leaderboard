@@ -5,7 +5,7 @@ import { computeAchievements } from "@/lib/achievements";
 import { ppgTrend, ratingHistogram } from "@/lib/distribution";
 import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
-import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets } from "@/lib/queries";
+import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets, getPlayerReclub } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
 import { racketPlayStyle } from "@/lib/racket-reco";
 import { nextReliabilityGate, reliabilityCap } from "@/lib/rating";
@@ -15,6 +15,7 @@ import AchievementsCard from "./AchievementsCard";
 import AttributeRadar from "./AttributeRadar";
 import FormStrip from "./FormStrip";
 import GearCard from "./GearCard";
+import ReclubCard from "./ReclubCard";
 import RatingHistogram from "@/app/trends/RatingHistogram";
 import GossipCardAsync from "./GossipCardAsync";
 import GossipCardSkeleton from "./GossipCardSkeleton";
@@ -39,26 +40,30 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   if (!player) {
     const exists = await getPlayer(id);
     if (!exists) notFound();
-    // Player exists but has no games yet — gear/position are still editable.
-    const gear = await getPlayerGear(id);
+    // Player exists but has no games yet — gear/position/profile still editable.
+    const [gear, reclub] = await Promise.all([getPlayerGear(id), getPlayerReclub(id)]);
     return (
       <div>
         <BackLink />
         <h1 className="font-display text-[48px] tracking-tight mt-4">{exists.name}</h1>
         <p className="text-body-muted mt-2 mb-8">No games recorded yet.</p>
-        <GearCard playerId={id} initial={gear} />
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
+          <ReclubCard playerId={id} name={exists.name} initial={reclub} />
+          <GearCard playerId={id} initial={gear} />
+        </div>
       </div>
     );
   }
 
   // Only the fast DB read blocks the page. The LLM Player Report streams in
   // separately via the <Suspense> boundary below, so the page renders at once.
-  const [matches, ratingField, results, gear, fieldRacketMap] = await Promise.all([
+  const [matches, ratingField, results, gear, fieldRacketMap, reclub] = await Promise.all([
     getPlayerMatchHistory(id),
     getRatingField(),
     fetchRawResults(),
     getPlayerGear(id),
     getPlayerRackets(),
+    getPlayerReclub(id),
   ]);
   const fieldRackets = [...fieldRacketMap].map(([playerId, rk]) => ({
     playerId,
@@ -122,8 +127,9 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             {level.badge} {level.category} · {level.description}
           </p>
         </div>
-        {/* Gear hero + rating share the right side; wrap together on mobile */}
+        {/* Profile + gear hero + rating share the right side; wrap on mobile */}
         <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
+          <ReclubCard playerId={id} name={r.name} initial={reclub} />
           <GearCard playerId={id} initial={gear} />
           <div className="text-right">
             <div className="font-display text-[64px] leading-none tracking-tightest">
