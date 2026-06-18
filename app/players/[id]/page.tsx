@@ -5,8 +5,9 @@ import { computeAchievements } from "@/lib/achievements";
 import { ppgTrend, ratingHistogram } from "@/lib/distribution";
 import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboard";
 import { levelForRating } from "@/lib/levels";
-import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets } from "@/lib/queries";
+import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets, getPlayerReclub } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
+import { avatarFor } from "@/lib/reclub-avatar";
 import { racketPlayStyle } from "@/lib/racket-reco";
 import { nextReliabilityGate, reliabilityCap } from "@/lib/rating";
 import { venueHook } from "@/lib/gossip";
@@ -15,6 +16,8 @@ import AchievementsCard from "./AchievementsCard";
 import AttributeRadar from "./AttributeRadar";
 import FormStrip from "./FormStrip";
 import GearCard from "./GearCard";
+import PlayerAvatar from "@/app/components/PlayerAvatar";
+import ReclubCard from "./ReclubCard";
 import RatingHistogram from "@/app/trends/RatingHistogram";
 import GossipCardAsync from "./GossipCardAsync";
 import GossipCardSkeleton from "./GossipCardSkeleton";
@@ -39,27 +42,40 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   if (!player) {
     const exists = await getPlayer(id);
     if (!exists) notFound();
-    // Player exists but has no games yet — gear/position are still editable.
-    const gear = await getPlayerGear(id);
+    // Player exists but has no games yet — gear/position/profile still editable.
+    const [gear, reclub] = await Promise.all([getPlayerGear(id), getPlayerReclub(id)]);
+    // Resolve the avatar live (stored value, or read off the profile page) so a
+    // seeded link with no cached avatar still shows a face.
+    const reclubResolved = { ...reclub, avatarUrl: await avatarFor(reclub.url, reclub.avatarUrl) };
     return (
       <div>
         <BackLink />
-        <h1 className="font-display text-[48px] tracking-tight mt-4">{exists.name}</h1>
+        <div className="flex items-center gap-4 mt-4">
+          <PlayerAvatar name={exists.name} avatarUrl={reclubResolved.avatarUrl} size={64} />
+          <h1 className="font-display text-[48px] tracking-tight">{exists.name}</h1>
+        </div>
         <p className="text-body-muted mt-2 mb-8">No games recorded yet.</p>
-        <GearCard playerId={id} initial={gear} />
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
+          <ReclubCard playerId={id} initial={reclubResolved} />
+          <GearCard playerId={id} initial={gear} />
+        </div>
       </div>
     );
   }
 
   // Only the fast DB read blocks the page. The LLM Player Report streams in
   // separately via the <Suspense> boundary below, so the page renders at once.
-  const [matches, ratingField, results, gear, fieldRacketMap] = await Promise.all([
+  const [matches, ratingField, results, gear, fieldRacketMap, reclub] = await Promise.all([
     getPlayerMatchHistory(id),
     getRatingField(),
     fetchRawResults(),
     getPlayerGear(id),
     getPlayerRackets(),
+    getPlayerReclub(id),
   ]);
+  // Resolve the avatar live (stored value, or read off the profile page) so a
+  // seeded link with no cached avatar still shows a face.
+  const reclubResolved = { ...reclub, avatarUrl: await avatarFor(reclub.url, reclub.avatarUrl) };
   const fieldRackets = [...fieldRacketMap].map(([playerId, rk]) => ({
     playerId,
     brand: rk.brand,
@@ -116,14 +132,18 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
               <span className="mono-label">Rank #{player.rank}</span>
             )}
           </div>
-          <h1 className="font-display text-[56px] leading-none tracking-tight">{r.name}</h1>
+          <div className="flex items-center gap-4">
+            <PlayerAvatar name={r.name} avatarUrl={reclubResolved.avatarUrl} size={72} />
+            <h1 className="font-display text-[56px] leading-none tracking-tight">{r.name}</h1>
+          </div>
           <p className="text-body-muted mt-2 max-w-md">{player.archetype.description}</p>
           <p className="text-body-muted mt-1 max-w-md text-sm">
             {level.badge} {level.category} · {level.description}
           </p>
         </div>
-        {/* Gear hero + rating share the right side; wrap together on mobile */}
+        {/* Profile + gear hero + rating share the right side; wrap on mobile */}
         <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
+          <ReclubCard playerId={id} initial={reclubResolved} />
           <GearCard playerId={id} initial={gear} />
           <div className="text-right">
             <div className="font-display text-[64px] leading-none tracking-tightest">

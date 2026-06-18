@@ -104,6 +104,56 @@ export async function getPlayerGear(id: string): Promise<PlayerGear> {
   }
 }
 
+// A player's Reclub profile link + cached avatar. Empty fields when unset or
+// Supabase isn't configured, so the editor renders an empty state.
+export interface PlayerReclub {
+  url: string | null;
+  avatarUrl: string | null;
+}
+
+export async function getPlayerReclub(id: string): Promise<PlayerReclub> {
+  const empty: PlayerReclub = { url: null, avatarUrl: null };
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("players")
+      .select("reclub_url, reclub_avatar_url")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return {
+      url: (data.reclub_url as string | null) ?? null,
+      avatarUrl: (data.reclub_avatar_url as string | null) ?? null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+// Every player's Reclub link + cached avatar, keyed by player id. Players with
+// no link are omitted. Returns an empty map when Supabase isn't configured, so
+// the leaderboard renders initials. Used to show avatars across the board.
+export async function getPlayerReclubProfiles(): Promise<Map<string, PlayerReclub>> {
+  const byPlayer = new Map<string, PlayerReclub>();
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("players")
+      .select("id, reclub_url, reclub_avatar_url")
+      .not("reclub_url", "is", null);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      byPlayer.set(row.id as string, {
+        url: (row.reclub_url as string | null) ?? null,
+        avatarUrl: (row.reclub_avatar_url as string | null) ?? null,
+      });
+    }
+    return byPlayer;
+  } catch {
+    return byPlayer;
+  }
+}
+
 // The racket each player has set on their profile, keyed by player id. Players
 // who haven't picked a racket are omitted. Returns an empty map when Supabase
 // isn't configured, so the racket leaderboard renders an empty state.
