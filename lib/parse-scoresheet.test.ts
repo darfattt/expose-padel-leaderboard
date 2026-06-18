@@ -4,14 +4,17 @@ import path from "node:path";
 import { parseScoresheet } from "./parse-scoresheet";
 
 async function findPdf(): Promise<string> {
-  const root = path.resolve(__dirname, "..");
-  const files = await readdir(root);
-  // Pin to the Mexicano sample — other scoresheets may also live in the root.
-  const pdf =
-    files.find((f) => /mexicano/i.test(f) && f.toLowerCase().endsWith(".pdf")) ??
-    files.find((f) => f.toLowerCase().endsWith(".pdf"));
-  if (!pdf) throw new Error("No sample PDF found in project root");
-  return path.join(root, pdf);
+  // Sample scoresheets live in the project root or in source_pdf/.
+  const roots = [path.resolve(__dirname, ".."), path.resolve(__dirname, "..", "source_pdf")];
+  for (const dir of roots) {
+    const files = await readdir(dir).catch(() => [] as string[]);
+    // Pin to the Mexicano sample — other scoresheets may also live alongside it.
+    const pdf =
+      files.find((f) => /mexicano/i.test(f) && f.toLowerCase().endsWith(".pdf")) ??
+      files.find((f) => f.toLowerCase().endsWith(".pdf"));
+    if (pdf) return path.join(dir, pdf);
+  }
+  throw new Error("No sample PDF found in project root or source_pdf/");
 }
 
 describe("parseScoresheet on the Reclub sample", () => {
