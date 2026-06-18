@@ -253,12 +253,12 @@ async function Tape({
 
       {/* 2D match simulation — the arcade replay of the full-picture edge */}
       <section className="mt-14">
-        <div className="flex items-baseline justify-between mb-3">
+        {/* <div className="flex items-baseline justify-between mb-3">
           <p className="mono-label">The tape · 8-bit replay</p>
           <span className="text-muted text-xs">
-            {playerA.row.name} &amp; pro vs {playerB.row.name} &amp; pro
+            {playerA.row.name}  vs {playerB.row.name}
           </span>
-        </div>
+        </div> */}
         <MatchSim
           script={script}
           nameA={playerA.row.name}

@@ -128,8 +128,8 @@ Each of the 4 characters surfaces 1–2 named moves, shown as labels that flash 
 
 | Frame | Skill | Effect in sim |
 |---|---|---|
-| power (diamond) | `Cannon Smash` | higher winner chance on attack points |
-| control (round) | `Wall Defense` | higher retrieval → fewer points conceded |
+| power (diamond) | `Fire Serve` | higher winner chance on attack points |
+| control (round) | `Great Wall` | higher retrieval → fewer points conceded |
 | balanced (teardrop) | `All-Court` | small bonus to both |
 
 **From the partner pro's archetype** (`archetype.primary` of the lookalike's band / player archetype)
@@ -138,8 +138,8 @@ Each of the 4 characters surfaces 1–2 named moves, shown as labels that flash 
 |---|---|
 | attack | `Vibora` |
 | clutch | `Ice Bandeja` |
-| consistency | `Metronome Lob` |
-| win | `Closer Instinct` |
+| consistency | `Tornado Lob` |
+| win | `Net Breaker` |
 | balanced | `Smart Play` |
 
 When a player has **no racket** set, only the pro signature shows. Skills are cosmetic-but-grounded:

@@ -1,0 +1,835 @@
+// Skill effect animations for the match canvas. Each named signature move from
+// lib/sim/skills.ts maps to a distinct, hand-drawn pixel effect: a cannonball
+// that flattens the opponent, a blazing fire serve, a winner that breaks the
+// net, ice shards raining down and freezing them, a serpentine víbora bolt, a
+// towering Great Wall the ball bounces off, a tornado that spins the opponent
+// "berputar putar", an all-court dash, a target-lock finisher and a clever-play
+// spark. Purely cosmetic — drawn over the scene while the skill label is
+// flashing (see MatchSim.FLASH_MS).
+//
+// drawSkillFx() renders the projectiles / particles; fxDynamics() returns the
+// knockdown + screen-shake the renderer applies to the victim's sprite and the
+// whole play area, so the visuals and the physical reaction stay in lock-step.
+// The tornado's victim-spin is driven separately in MatchSim (an AvatarPose.spin)
+// since it whirls the sprite rather than toppling it.
+
+export type FxKind =
+  | "cannon"
+  | "fireserve"
+  | "netbreak"
+  | "ice"
+  | "vibora"
+  | "wall"
+  | "greatwall"
+  | "lob"
+  | "tornado"
+  | "allcourt"
+  | "closer"
+  | "smart";
+
+// The centre net's x in canvas pixels (cx(0.5)) and the playing area's vertical
+// span (cy(0)..cy(1)); duplicated here so the net-break and Great Wall can sit on
+// the real court without threading court constants through every draw call. Keep
+// in sync with MatchSim's PAD_*/NET_X if those move (drawWall already assumes 240).
+const NET_PX = 240;
+const COURT_TOP = 50;
+const COURT_BOTTOM = 244;
+
+// Attacker (effect origin) and victim (impact point), in canvas pixels.
+export interface FxGeom {
+  ax: number;
+  ay: number;
+  vx: number;
+  vy: number;
+}
+
+// Map a skill's display name (from lib/sim/skills.ts) to its effect. Falls back
+// to the understated "smart play" spark for anything unrecognised.
+export function fxKindForSkill(name: string): FxKind {
+  switch (name) {
+    case "Cannon Smash":
+      return "cannon";
+    case "Fire Serve":
+      return "fireserve";
+    case "Net Breaker":
+      return "netbreak";
+    case "Ice Bandeja":
+      return "ice";
+    case "Víbora":
+      return "vibora";
+    case "Wall Defense": // legacy name — now renders the Great Wall
+    case "Great Wall":
+      return "greatwall";
+    case "Metronome Lob": // legacy name — now whips up a tornado
+    case "Tornado Lob":
+      return "tornado";
+    case "All-Court":
+      return "allcourt";
+    case "Closer Instinct":
+      return "closer";
+    default:
+      return "smart";
+  }
+}
+
+// How hard a skill hits: knockdown drives the victim's topple (0 = upright,
+// 1 = flat out); shake is the screen jolt in pixels. Defensive / finesse moves
+// return zero — only the strikes put someone on the floor.
+export function fxDynamics(kind: FxKind, p: number): { knockdown: number; shake: number } {
+  const afterHit = (hit: string | number, ramp: number) =>
+    p < (hit as number) ? 0 : Math.min(1, (p - (hit as number)) / ramp);
+  const fade = (hit: number, span: number, amp: number) =>
+    p < hit ? 0 : amp * Math.max(0, 1 - (p - hit) / span);
+
+  switch (kind) {
+    case "cannon":
+      return { knockdown: afterHit(0.42, 0.12), shake: fade(0.42, 0.4, 3.4) };
+    case "fireserve":
+      return { knockdown: afterHit(0.45, 0.12), shake: fade(0.45, 0.4, 3.2) };
+    case "closer":
+      return { knockdown: 0.85 * afterHit(0.5, 0.12), shake: fade(0.5, 0.35, 2.2) };
+    case "ice":
+      return { knockdown: afterHit(0.45, 0.22), shake: fade(0.45, 0.3, 1.3) };
+    case "vibora":
+      return { knockdown: 0.5 * afterHit(0.4, 0.15), shake: fade(0.4, 0.3, 1.6) };
+    case "netbreak":
+      // No one topples — the net does; the court just jolts as it tears.
+      return { knockdown: 0, shake: fade(0.3, 0.45, 3.6) };
+    case "tornado":
+      // The victim spins (handled via AvatarPose.spin), so no knockdown here —
+      // just a swelling rumble while the funnel is on them.
+      return { knockdown: 0, shake: Math.max(0, 1.4 * Math.sin(Math.PI * p)) };
+    case "allcourt":
+      return { knockdown: 0.35 * afterHit(0.5, 0.22), shake: 0 };
+    default:
+      return { knockdown: 0, shake: 0 }; // wall, greatwall, lob, smart — feet stay planted
+  }
+}
+
+// The fraction of the flash timeline (0..1 of FLASH_MS) at which each effect
+// visually *lands* — the cannonball detonates, the shards shatter, the funnel
+// touches down. The renderer uses the matching `hit` constants in each draw fn;
+// MatchSim reads this so the impact sound fires on the hit, not when the label
+// first pops up. Keep in step with the `hit`/`rise` thresholds in the draws.
+export function fxImpactFraction(kind: FxKind): number {
+  switch (kind) {
+    case "cannon":
+      return 0.42;
+    case "fireserve":
+      return 0.45;
+    case "ice":
+      return 0.45;
+    case "vibora":
+      return 0.4;
+    case "netbreak":
+      return 0.3;
+    case "wall":
+    case "greatwall":
+      return 0.34;
+    case "tornado":
+      return 0.28;
+    case "closer":
+    case "allcourt":
+      return 0.5;
+    case "lob":
+      return 0.5;
+    default:
+      return 0.12; // smart play — the spark is early and lingering
+  }
+}
+
+// --- low-level helpers ------------------------------------------------------
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+function circle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+function star(ctx: CanvasRenderingContext2D, x: number, y: number, ro: number, ri: number) {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    const rr = i % 2 ? ri : ro;
+    const sx = x + Math.cos(a) * rr;
+    const sy = y + Math.sin(a) * rr;
+    if (i) ctx.lineTo(sx, sy);
+    else ctx.moveTo(sx, sy);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+// Stable pseudo-random in [0,1) from a seed + index (so particles don't flicker
+// frame to frame — they're a fixed function of the effect's seed).
+function rand(seed: number, i: number): number {
+  const x = Math.sin(seed * 0.013 + i * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+// --- celebration ------------------------------------------------------------
+
+const CONFETTI = ["#ff5c5c", "#ffd24a", "#7fe6cf", "#6db3ff", "#ff9d85", "#caa6ff", "#9fe870"];
+
+// Confetti rain for the post-match celebration. Pieces fall and loop across the
+// court band [x0,x1] × [yTop,yBottom]; their spread, speed and sway are a fixed
+// function of the piece index, so they don't flicker, and `t` (a free-running
+// celebration clock in ms) drives the descent. Drawn over the whole scene.
+export function drawConfetti(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  x0: number,
+  x1: number,
+  yTop: number,
+  yBottom: number,
+  count = 40
+) {
+  const span = x1 - x0;
+  const fall = yBottom - yTop + 40;
+  for (let i = 0; i < count; i++) {
+    const base = x0 + rand(i, 1) * span;
+    const speed = 0.04 + rand(i, 2) * 0.06;
+    const y = yTop - 20 + ((t * speed + rand(i, 3) * fall) % fall);
+    const sway = Math.sin(t * 0.005 + i) * 5;
+    const flutter = Math.cos(t * 0.012 + i) > 0 ? 2 : 1; // flip width to "tumble"
+    ctx.fillStyle = CONFETTI[i % CONFETTI.length];
+    ctx.fillRect(Math.round(base + sway), Math.round(y), flutter, 3);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- per-skill effects ------------------------------------------------------
+
+export function drawSkillFx(
+  ctx: CanvasRenderingContext2D,
+  kind: FxKind,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  switch (kind) {
+    case "cannon":
+      return drawCannon(ctx, p, g, seed);
+    case "fireserve":
+      return drawFireServe(ctx, p, g, seed);
+    case "netbreak":
+      return drawNetBreak(ctx, p, g, seed);
+    case "ice":
+      return drawIce(ctx, p, g, seed);
+    case "vibora":
+      return drawVibora(ctx, p, g, seed);
+    case "wall":
+      return drawWall(ctx, p, g);
+    case "greatwall":
+      return drawGreatWall(ctx, p, g);
+    case "lob":
+      return drawLob(ctx, p, g, color);
+    case "tornado":
+      return drawTornado(ctx, p, g, seed);
+    case "allcourt":
+      return drawAllcourt(ctx, p, g, color, seed);
+    case "closer":
+      return drawCloser(ctx, p, g);
+    case "smart":
+      return drawSmart(ctx, p, g, color);
+  }
+}
+
+// Cannon Smash — a cannonball arcs over, then detonates on the opponent.
+function drawCannon(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const hit = 0.42;
+  if (p < hit) {
+    const t = p / hit;
+    // smoke trail behind the ball
+    for (let i = 1; i <= 4; i++) {
+      const tt = Math.max(0, t - i * 0.07);
+      const sx = lerp(g.ax, g.vx, tt);
+      const sy = lerp(g.ay, g.vy, tt) - 26 * Math.sin(Math.PI * tt);
+      ctx.globalAlpha = 0.25 * (1 - i / 5);
+      ctx.fillStyle = "#9aa3ad";
+      ctx.fillRect(Math.round(sx) - 1, Math.round(sy) - 1, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+    // muzzle flash at the cannon
+    if (t < 0.18) {
+      ctx.globalAlpha = 1 - t / 0.18;
+      ctx.fillStyle = "#ffd24a";
+      star(ctx, g.ax, g.ay, 8, 3);
+      ctx.globalAlpha = 1;
+    }
+    // the ball
+    const bx = lerp(g.ax, g.vx, t);
+    const by = lerp(g.ay, g.vy, t) - 26 * Math.sin(Math.PI * t);
+    ctx.fillStyle = "#15181c";
+    circle(ctx, bx, by, 3.2);
+    ctx.fillStyle = "#3a4048";
+    circle(ctx, bx - 1, by - 1, 1.1);
+  } else {
+    const e = (p - hit) / (1 - hit);
+    const R = 6 + e * 20;
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = "#ffb23a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(g.vx, g.vy, R, 0, Math.PI * 2);
+    ctx.stroke();
+    for (let i = 0; i < 9; i++) {
+      const a = i * ((Math.PI * 2) / 9) + seed;
+      const d = R * (0.55 + 0.45 * rand(seed, i));
+      const dx = g.vx + Math.cos(a) * d;
+      const dy = g.vy + Math.sin(a) * d;
+      ctx.fillStyle = i % 2 ? "#ffd24a" : "#ff7a1a";
+      ctx.fillRect(Math.round(dx) - 1, Math.round(dy) - 1, 2, 2);
+    }
+    if (e < 0.4) {
+      ctx.globalAlpha = 1 - e / 0.4;
+      ctx.fillStyle = "#fff2c2";
+      circle(ctx, g.vx, g.vy, 3 + 6 * (1 - e / 0.4));
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Ice Bandeja — shards rain from above, then shatter and freeze the opponent.
+function drawIce(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const hit = 0.45;
+  const n = 7;
+  if (p < hit) {
+    const t = p / hit;
+    for (let i = 0; i < n; i++) {
+      const delay = i * 0.05;
+      const tt = clamp((t - delay) / (1 - delay), 0, 1);
+      if (tt <= 0) continue;
+      const sx = g.vx + (i - (n - 1) / 2) * 5 + (rand(seed, i) - 0.5) * 6;
+      const sy = lerp(-10, g.vy, tt);
+      drawShard(ctx, sx, sy, 0.7 + 0.3 * rand(seed, i + 9));
+    }
+  } else {
+    const e = (p - hit) / (1 - hit);
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = "#bfe9ff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(g.vx, g.vy, 4 + e * 16, 0, Math.PI * 2);
+    ctx.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = i * ((Math.PI * 2) / 8);
+      const d = e * 16;
+      drawShard(ctx, g.vx + Math.cos(a) * d, g.vy + Math.sin(a) * d, 0.6);
+    }
+    for (let i = 0; i < 6; i++) {
+      ctx.globalAlpha = (1 - e) * 0.8;
+      ctx.fillStyle = "#eaf7ff";
+      ctx.fillRect(
+        Math.round(g.vx + (rand(seed, i) - 0.5) * 22),
+        Math.round(g.vy - 6 + e * 14 + rand(seed, i + 3) * 6),
+        1,
+        1
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+function drawShard(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  ctx.fillStyle = "#9fd8ff";
+  ctx.beginPath();
+  ctx.moveTo(x, y - 4 * s);
+  ctx.lineTo(x + 2 * s, y);
+  ctx.lineTo(x, y + 4 * s);
+  ctx.lineTo(x - 2 * s, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#e6f6ff";
+  ctx.fillRect(Math.round(x), Math.round(y) - 1, 1, 2);
+}
+
+// Víbora — a green serpentine bolt whips across and snaps at the opponent.
+function drawVibora(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const hit = 0.4;
+  const t = clamp(p / hit, 0, 1);
+  const perp = Math.atan2(g.vy - g.ay, g.vx - g.ax) + Math.PI / 2;
+  ctx.strokeStyle = "#39d353";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const steps = 14;
+  for (let i = 0; i <= steps; i++) {
+    const u = (i / steps) * t;
+    const bx = lerp(g.ax, g.vx, u);
+    const by = lerp(g.ay, g.vy, u);
+    const amp = 6 * Math.sin(u * Math.PI * 3 + seed);
+    const x = bx + Math.cos(perp) * amp;
+    const y = by + Math.sin(perp) * amp;
+    if (i) ctx.lineTo(x, y);
+    else ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+  const hx = lerp(g.ax, g.vx, t);
+  const hy = lerp(g.ay, g.vy, t);
+  ctx.fillStyle = "#2bb443";
+  circle(ctx, hx, hy, 2.4);
+  ctx.fillStyle = "#d33";
+  ctx.fillRect(Math.round(hx) - 1, Math.round(hy), 2, 1);
+  if (p >= hit) {
+    const e = (p - hit) / (1 - hit);
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    for (let i = 0; i < 6; i++) {
+      const a = i + seed;
+      ctx.fillStyle = "#7CFC00";
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(a) * e * 12) - 1,
+        Math.round(g.vy + Math.sin(a) * e * 12) - 1,
+        2,
+        2
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Wall Defense — a glass wall rises in front of the defender; the ball ricochets.
+function drawWall(ctx: CanvasRenderingContext2D, p: number, g: FxGeom) {
+  const rise = Math.min(1, p / 0.3);
+  const toNet = g.ax < 240 ? 11 : -11; // shade toward the centre net
+  const wx = g.ax + toNet;
+  const h = 30 * rise;
+  const top = g.ay - 15;
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = "#bfe9ff";
+  ctx.fillRect(Math.round(wx) - 2, Math.round(top), 4, h);
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = "#eaf7ff";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(wx) - 2, Math.round(top), 4, h);
+  if (p > 0.3 && p < 0.62) {
+    const e = (p - 0.3) / 0.32;
+    ctx.globalAlpha = 1 - e;
+    ctx.fillStyle = "#ffffff";
+    for (let i = 0; i < 5; i++) {
+      ctx.fillRect(Math.round(wx + e * 14) - 1, Math.round(top + 4 + i * 5), 1, 1);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Metronome Lob — a high looping arc with a ticking pendulum.
+function drawLob(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, color: string) {
+  const t = clamp(p / 0.7, 0, 1);
+  const dots = 10;
+  ctx.fillStyle = color;
+  for (let i = 0; i <= dots; i++) {
+    const u = i / dots;
+    if (u > t) break;
+    const x = lerp(g.ax, g.vx, u);
+    const y = lerp(g.ay, g.vy, u) - 42 * Math.sin(Math.PI * u);
+    ctx.globalAlpha = 0.8;
+    ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+  }
+  const x = lerp(g.ax, g.vx, t);
+  const y = lerp(g.ay, g.vy, t) - 42 * Math.sin(Math.PI * t);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#e8f94a";
+  circle(ctx, x, y, 2.4);
+  // pendulum tick above the landing spot
+  const sway = Math.sin(p * Math.PI * 4) * 7;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(g.vx, 14);
+  ctx.lineTo(g.vx + sway, 4);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  circle(ctx, g.vx + sway, 4, 1.6);
+}
+
+// All-Court — a rapid dash with fading after-images and a sparkle on arrival.
+function drawAllcourt(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  for (let i = 0; i < 5; i++) {
+    const u = clamp(p - i * 0.08, 0, 1);
+    const x = lerp(g.ax, (g.ax + g.vx) / 2, u);
+    const y = lerp(g.ay, g.vy, u);
+    ctx.globalAlpha = 0.5 * (1 - i / 5);
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(x) - 3, Math.round(y) - 5, 6, 11);
+  }
+  ctx.globalAlpha = 1;
+  if (p > 0.5) {
+    const e = (p - 0.5) / 0.5;
+    for (let i = 0; i < 6; i++) {
+      const a = i * 1.05 + seed;
+      ctx.globalAlpha = 1 - e;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(a) * e * 12) - 1,
+        Math.round(g.vy + Math.sin(a) * e * 12) - 1,
+        2,
+        2
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Closer Instinct — a target reticle locks on, then a finishing strike.
+function drawCloser(ctx: CanvasRenderingContext2D, p: number, g: FxGeom) {
+  const hit = 0.5;
+  if (p < hit) {
+    const t = p / hit;
+    const R = 18 - t * 10;
+    ctx.strokeStyle = "#ff5252";
+    ctx.lineWidth = 1.5;
+    bracket(ctx, g.vx - R, g.vy - R, 1, 1);
+    bracket(ctx, g.vx + R, g.vy - R, -1, 1);
+    bracket(ctx, g.vx - R, g.vy + R, 1, -1);
+    bracket(ctx, g.vx + R, g.vy + R, -1, -1);
+    ctx.beginPath();
+    ctx.arc(g.vx, g.vy, R * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    const e = (p - hit) / (1 - hit);
+    ctx.globalAlpha = Math.max(0, 1 - e * 1.2);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(g.vx - 14, g.vy - 14);
+    ctx.lineTo(g.vx + 14, g.vy + 14);
+    ctx.moveTo(g.vx + 14, g.vy - 14);
+    ctx.lineTo(g.vx - 14, g.vy + 14);
+    ctx.stroke();
+    ctx.fillStyle = "#ff5252";
+    for (let i = 0; i < 6; i++) {
+      const a = i * 1.05;
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(a) * e * 14) - 1,
+        Math.round(g.vy + Math.sin(a) * e * 14) - 1,
+        2,
+        2
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+function bracket(ctx: CanvasRenderingContext2D, x: number, y: number, sx: number, sy: number) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + sy * 5);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + sx * 5, y);
+  ctx.stroke();
+}
+
+// Smart Play — a lightbulb sparks over the player; a clever idea drifts across.
+function drawSmart(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, color: string) {
+  const x = g.ax;
+  const y = g.ay - 16;
+  const glow = 0.5 + 0.5 * Math.sin(p * Math.PI * 6);
+  ctx.globalAlpha = 0.5 + 0.5 * glow;
+  ctx.fillStyle = "#ffe98a";
+  circle(ctx, x, y, 3);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#caa83a";
+  ctx.fillRect(Math.round(x) - 1, Math.round(y) + 3, 2, 2);
+  ctx.strokeStyle = "#ffe98a";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 6; i++) {
+    const a = i * ((Math.PI * 2) / 6);
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a) * 5, y + Math.sin(a) * 5);
+    ctx.lineTo(x + Math.cos(a) * (7 + glow * 2), y + Math.sin(a) * (7 + glow * 2));
+    ctx.stroke();
+  }
+  if (p > 0.4) {
+    const e = (p - 0.4) / 0.6;
+    for (let i = 0; i < 4; i++) {
+      const u = clamp(e - i * 0.1, 0, 1);
+      const sx = lerp(x, g.vx, u);
+      const sy = lerp(y, g.vy, u);
+      ctx.globalAlpha = 1 - u;
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.round(sx) - 1, Math.round(sy) - 1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Fire Serve — a blazing serve arcs over trailing flame, then erupts into a
+// fireball that licks up over the opponent.
+function drawFireServe(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const hit = 0.45;
+  const flame = (x: number, y: number, s: number, i: number) => {
+    // A little three-tone tongue of fire (red base, orange middle, yellow tip).
+    ctx.fillStyle = "#d62828";
+    ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, Math.round(4 * s) + 2);
+    ctx.fillStyle = "#ff7a1a";
+    ctx.fillRect(Math.round(x) - 1, Math.round(y) - Math.round(2 * s) - 1, 2, Math.round(3 * s) + 1);
+    ctx.fillStyle = i % 2 ? "#ffd24a" : "#fff2c2";
+    ctx.fillRect(Math.round(x), Math.round(y) - Math.round(4 * s) - 1, 1, 2);
+  };
+  if (p < hit) {
+    const t = p / hit;
+    // flame trail behind the serve
+    for (let i = 1; i <= 5; i++) {
+      const tt = Math.max(0, t - i * 0.06);
+      const sx = lerp(g.ax, g.vx, tt);
+      const sy = lerp(g.ay, g.vy, tt) - 30 * Math.sin(Math.PI * tt);
+      const flick = 0.6 + 0.5 * rand(seed, i + Math.floor(t * 20));
+      ctx.globalAlpha = 0.5 * (1 - i / 6);
+      flame(sx, sy + 2, flick, i);
+    }
+    ctx.globalAlpha = 1;
+    // the burning ball
+    const bx = lerp(g.ax, g.vx, t);
+    const by = lerp(g.ay, g.vy, t) - 30 * Math.sin(Math.PI * t);
+    ctx.fillStyle = "#ff7a1a";
+    circle(ctx, bx, by, 3.2);
+    ctx.fillStyle = "#ffe98a";
+    circle(ctx, bx, by, 1.6);
+  } else {
+    const e = (p - hit) / (1 - hit);
+    // expanding heat ring
+    const R = 6 + e * 18;
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = "#ff9d2a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(g.vx, g.vy, R, 0, Math.PI * 2);
+    ctx.stroke();
+    // tongues of flame rising off the opponent, plus a few flying embers
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const fx = g.vx + (i - (n - 1) / 2) * 4;
+      const flick = 0.7 + 0.6 * rand(seed, i + Math.floor(e * 14));
+      ctx.globalAlpha = Math.max(0, 1 - e * 0.8);
+      flame(fx, g.vy + 3 - e * 6, flick * (1.2 - e), i);
+    }
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    for (let i = 0; i < 8; i++) {
+      const a = i * ((Math.PI * 2) / 8) + seed;
+      const d = R * (0.5 + 0.5 * rand(seed, i));
+      ctx.fillStyle = i % 2 ? "#ffd24a" : "#ff5c5c";
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(a) * d) - 1,
+        Math.round(g.vy + Math.sin(a) * d - e * 10) - 1,
+        2,
+        2
+      );
+    }
+    // dark smoke curling up as it dies down
+    if (e > 0.4) {
+      ctx.globalAlpha = (e - 0.4) * 0.5;
+      ctx.fillStyle = "#5a5450";
+      for (let i = 0; i < 4; i++) {
+        ctx.fillRect(
+          Math.round(g.vx + (rand(seed, i) - 0.5) * 12),
+          Math.round(g.vy - 8 - e * 14 - i * 3),
+          3,
+          3
+        );
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Net Breaker — a heavy winner slams the centre net; it cracks, then the mesh
+// blows apart around the impact, panels tumbling away with gravity.
+function drawNetBreak(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const hit = 0.3;
+  // Centre the break on the impact height, kept inside the net's run.
+  const cyImpact = clamp(g.vy, COURT_TOP + 14, COURT_BOTTOM - 14);
+  const half = 22;
+  const top = cyImpact - half;
+  const bot = cyImpact + half;
+  if (p < hit) {
+    const t = p / hit;
+    // a crack races out from the centre as the ball arrives
+    ctx.strokeStyle = "#fff2c2";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(NET_PX, cyImpact);
+    for (let i = 1; i <= 6; i++) {
+      ctx.lineTo(NET_PX + (rand(seed, i) - 0.5) * 8 * t, cyImpact - (t * half * i) / 6);
+    }
+    ctx.moveTo(NET_PX, cyImpact);
+    for (let i = 1; i <= 6; i++) {
+      ctx.lineTo(NET_PX + (rand(seed, i + 6) - 0.5) * 8 * t, cyImpact + (t * half * i) / 6);
+    }
+    ctx.stroke();
+    // bright flash at the point of contact
+    ctx.globalAlpha = 1 - t;
+    ctx.fillStyle = "#ffffff";
+    circle(ctx, NET_PX, cyImpact, 3 + 4 * (1 - t));
+    ctx.globalAlpha = 1;
+  } else {
+    const e = (p - hit) / (1 - hit);
+    // the standing remnants of the net above and below the torn gap
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    const gap = half * Math.min(1, e * 1.4);
+    ctx.fillRect(NET_PX - 1, COURT_TOP - 4, 2, top - gap - (COURT_TOP - 4));
+    ctx.fillRect(NET_PX - 1, bot + gap, 2, COURT_BOTTOM + 4 - (bot + gap));
+    // panels of mesh flung off, falling and fading
+    for (let i = 0; i < 10; i++) {
+      const side = i % 2 ? 1 : -1;
+      const sp = 0.5 + rand(seed, i);
+      const px = NET_PX + side * e * (10 + 26 * sp);
+      const py = cyImpact + (rand(seed, i + 3) - 0.5) * half * 1.6 + e * e * 40 * sp;
+      ctx.globalAlpha = Math.max(0, 1 - e);
+      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      // a little cross of net so each shard still reads as mesh
+      ctx.fillRect(Math.round(px) - 1, Math.round(py), 3, 1);
+      ctx.fillRect(Math.round(px), Math.round(py) - 1, 1, 3);
+    }
+    // sparks at the tear
+    ctx.globalAlpha = Math.max(0, 1 - e * 1.3);
+    for (let i = 0; i < 6; i++) {
+      const a = i * ((Math.PI * 2) / 6) + seed;
+      ctx.fillStyle = i % 2 ? "#ffd24a" : "#fff2c2";
+      ctx.fillRect(
+        Math.round(NET_PX + Math.cos(a) * e * 16) - 1,
+        Math.round(cyImpact + Math.sin(a) * e * 16) - 1,
+        2,
+        2
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Great Wall — a tall battlemented stone wall rises in front of the defender;
+// the ball thuds into it and drops. A grander cousin of the glass Wall Defense.
+function drawGreatWall(ctx: CanvasRenderingContext2D, p: number, g: FxGeom) {
+  const rise = Math.min(1, p / 0.32);
+  const toNet = g.ax < NET_PX ? 16 : -16; // stand the wall toward the centre net
+  const wx = Math.round(g.ax + toNet);
+  const fullH = 46;
+  const h = fullH * rise;
+  const wHalf = 13;
+  const base = g.vy + 16; // foot of the wall, a touch below the defender
+  const topY = base - h;
+  // stone body
+  ctx.fillStyle = "#8a7b63";
+  ctx.fillRect(wx - wHalf, Math.round(topY), wHalf * 2, Math.round(h));
+  // brick courses — offset rows of mortar lines
+  ctx.strokeStyle = "rgba(40,32,24,0.55)";
+  ctx.lineWidth = 1;
+  const courseH = 6;
+  for (let y = base - courseH; y > topY; y -= courseH) {
+    ctx.beginPath();
+    ctx.moveTo(wx - wHalf, Math.round(y) + 0.5);
+    ctx.lineTo(wx + wHalf, Math.round(y) + 0.5);
+    ctx.stroke();
+    const row = Math.round((base - y) / courseH);
+    const offset = row % 2 ? 0 : Math.round(wHalf / 2); // stagger the vertical joints
+    for (let x = wx - wHalf + offset; x < wx + wHalf; x += wHalf) {
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, Math.round(y));
+      ctx.lineTo(Math.round(x) + 0.5, Math.round(y) + courseH);
+      ctx.stroke();
+    }
+  }
+  // crenellated battlement along the top (merlons), once it's near full height
+  if (rise > 0.6) {
+    ctx.fillStyle = "#9a8b70";
+    for (let i = -1; i <= 1; i++) {
+      ctx.fillRect(wx + i * 9 - 3, Math.round(topY) - 4, 6, 5);
+    }
+    // lit top edge for a little depth
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(wx - wHalf, Math.round(topY), wHalf * 2, 1);
+  }
+  // the ball thuds in and drops down the face
+  if (p > 0.34 && p < 0.7) {
+    const e = (p - 0.34) / 0.36;
+    const bx = wx + (toNet > 0 ? -wHalf - 3 : wHalf + 3);
+    const by = topY + 6 + e * (h - 10);
+    ctx.fillStyle = "#e8f94a";
+    circle(ctx, bx, by, 2.2);
+    // dust puff on contact
+    if (e < 0.3) {
+      ctx.globalAlpha = (0.3 - e) / 0.3;
+      ctx.fillStyle = "#cbbfa6";
+      for (let i = 0; i < 4; i++) {
+        ctx.fillRect(Math.round(bx + (i - 1.5) * 2), Math.round(by - 2 - i), 1, 1);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Tornado — a swirling funnel drops onto the opponent (who is spun "berputar
+// putar" via AvatarPose.spin in MatchSim). Stacked rotating bands + orbiting
+// debris + a dust skirt at the base.
+function drawTornado(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const drop = Math.min(1, p / 0.28); // funnel descends, then lingers
+  const spin = p * Math.PI * 8 + seed; // matches the victim's whirl
+  const baseY = g.vy + 10;
+  const topY = COURT_TOP - 6;
+  const reach = topY + (baseY - topY) * drop; // how far down the tip has reached
+  const bands = 9;
+  // body: stacked elliptical bands, narrow at the tip, flaring to the top
+  for (let i = 0; i < bands; i++) {
+    const u = i / (bands - 1); // 0 at tip, 1 at top
+    const by = lerp(baseY, topY, u);
+    if (by > reach) continue; // not yet descended this far
+    const rx = 3 + u * 16;
+    const sway = Math.sin(spin + u * 4) * (2 + u * 3);
+    ctx.globalAlpha = 0.18 + 0.22 * (1 - u);
+    ctx.fillStyle = i % 2 ? "#cfd6de" : "#9aa3ad";
+    ctx.beginPath();
+    ctx.ellipse(g.vx + sway, by, rx, 2.2 + u * 1.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // a couple of swirling highlight strands spiralling up the funnel
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = "#eef2f6";
+  ctx.lineWidth = 1;
+  for (let s = 0; s < 2; s++) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= bands; i++) {
+      const u = i / bands;
+      const by = lerp(baseY, topY, u);
+      if (by > reach) continue;
+      const rx = 3 + u * 16;
+      const a = spin + u * 6 + s * Math.PI;
+      const x = g.vx + Math.sin(spin + u * 4) * (2 + u * 3) + Math.cos(a) * rx;
+      if (started) ctx.lineTo(x, by);
+      else {
+        ctx.moveTo(x, by);
+        started = true;
+      }
+    }
+    ctx.stroke();
+  }
+  // debris orbiting the victim
+  ctx.globalAlpha = 0.85;
+  for (let i = 0; i < 7; i++) {
+    const a = spin * (1 + i * 0.05) + i * 1.1;
+    const r = 6 + (i % 3) * 5 + Math.sin(spin + i) * 2;
+    ctx.fillStyle = i % 2 ? "#c8b78f" : "#8f8a82";
+    ctx.fillRect(
+      Math.round(g.vx + Math.cos(a) * r) - 1,
+      Math.round(g.vy - 2 + Math.sin(a) * r * 0.5) - 1,
+      2,
+      2
+    );
+  }
+  // dust skirt kicked up at the base
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = "#b8ad97";
+  for (let i = 0; i < 6; i++) {
+    const a = spin * 1.3 + i;
+    ctx.fillRect(Math.round(g.vx + Math.cos(a) * (6 + i)) - 1, Math.round(baseY + 2), 2, 1);
+  }
+  ctx.globalAlpha = 1;
+}

@@ -15,18 +15,18 @@ export interface Skill {
 
 // Racket frame → signature, keyed by play-style (lib/racket-reco.ts).
 const RACKET_SKILL: Record<RacketPlayStyle, { name: string; effect: string }> = {
-  power: { name: "Cannon Smash", effect: "Higher winner chance on attacking points." },
-  control: { name: "Wall Defense", effect: "Better retrieval — concedes fewer cheap points." },
+  power: { name: "Fire Serve", effect: "A blazing serve — higher winner chance on attacking points." },
+  control: { name: "Great Wall", effect: "Better retrieval — the wall holds, conceding fewer cheap points." },
   balanced: { name: "All-Court", effect: "A small edge at both ends of the court." },
 };
 
 // Partner pro's primary archetype trait → signature move.
 const PRO_SKILL: Record<AttributeKey | "balanced", { name: string; effect: string }> = {
   attack: { name: "Víbora", effect: "Whippy attacking winner from the partner pro." },
-  defense: { name: "Wall Defense", effect: "The pro digs out balls others can't reach." },
-  consistency: { name: "Metronome Lob", effect: "Relentless, low-error lobbing resets the point." },
+  defense: { name: "Great Wall", effect: "The pro's wall digs out balls others can't reach." },
+  consistency: { name: "Tornado Lob", effect: "Relentless, swirling lobs that spin the opponent around." },
   clutch: { name: "Ice Bandeja", effect: "Cold-blooded bandeja that owns the big points." },
-  win: { name: "Closer Instinct", effect: "Finds the finish once the rally tilts their way." },
+  win: { name: "Net Breaker", effect: "A winner so heavy it tears the net once the rally tilts their way." },
   balanced: { name: "Smart Play", effect: "Reads the point and picks the right shot." },
 };
 

@@ -84,7 +84,7 @@ describe("powerInput", () => {
 describe("teamSkills", () => {
   it("includes the racket skill when a style is given", () => {
     const skills = teamSkills("power", "attack");
-    expect(skills.find((s) => s.source === "racket")?.name).toBe("Cannon Smash");
+    expect(skills.find((s) => s.source === "racket")?.name).toBe("Fire Serve");
     expect(skills.find((s) => s.source === "pro")).toBeTruthy();
   });
 

@@ -4,7 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PlayerAvatar from "@/app/components/PlayerAvatar";
 import { buildMatchScript, type MatchScript } from "@/lib/sim/engine";
 import type { TeamSpec } from "@/lib/sim/team";
-import { drawAvatar } from "./avatar-sprite";
+import { drawAvatar, type AvatarPose } from "./avatar-sprite";
+import {
+  drawConfetti,
+  drawSkillFx,
+  fxDynamics,
+  fxImpactFraction,
+  fxKindForSkill,
+  type FxKind,
+} from "./skill-fx";
 
 // Dumb player of a MatchScript. All outcome logic lives in lib/sim/engine.ts
 // (pure, tested). This component is cosmetic only: it tweens the ball, runs the
@@ -77,13 +85,18 @@ interface ScoreMark {
 }
 interface SkillMark {
   time: number;
-  team: "A" | "B";
+  team: "A" | "B"; // the side performing the skill
   name: string;
+  kind: FxKind; // which effect animation to play
+  victim: "A" | "B"; // the side on the receiving end
+  vx: number; // impact point (where the winning shot landed), court coords
+  vy: number;
 }
 interface SoundMark {
   time: number;
   kind: SoundKind;
   team?: "A" | "B";
+  fx?: FxKind; // for "skill" marks: which effect, so each gets its own sound
 }
 interface LogEntry {
   time: number;
@@ -190,8 +203,20 @@ function buildTimeline(script: MatchScript): Timeline {
     sounds.push({ time: t, kind: pt.big ? "big" : "point", team: pt.winner });
 
     if (pt.skill) {
-      skills.push({ time: t, team: pt.skill.team, name: pt.skill.skill.name });
-      sounds.push({ time: t + 40, kind: "skill", team: pt.skill.team });
+      const land = rally[rally.length - 1]; // winning shot lands on the loser's side
+      const fx = fxKindForSkill(pt.skill.skill.name);
+      skills.push({
+        time: t,
+        team: pt.skill.team,
+        name: pt.skill.skill.name,
+        kind: fx,
+        victim: other(pt.skill.team),
+        vx: land.x,
+        vy: land.y,
+      });
+      // Fire the impact sound when the effect lands (not at the label flash), and
+      // tag it so playSound can give each move its own voice.
+      sounds.push({ time: t + FLASH_MS * fxImpactFraction(fx), kind: "skill", team: pt.skill.team, fx });
       const who = pt.skill.skill.member === 0
         ? (pt.skill.team === "A" ? script.teamA.playerName : script.teamB.playerName)
         : (pt.skill.team === "A" ? script.teamA.proName : script.teamB.proName);
@@ -263,20 +288,59 @@ function nearestOnSide(side: "A" | "B", tx: number, ty: number): number {
   return best;
 }
 
+// Move the idle partner on a side instead of leaving it glued to home: the
+// player not on the ball covers the open court — drops back when their partner
+// charges the net (and pinches in when the partner retreats), and shades laterally
+// to the opposite side of the active player. Classic up-and-back padel cover, and
+// it means the four figures never move in lock-step.
+function coverPartner(
+  side: "A" | "B",
+  idx: [number, number],
+  striker: number,
+  receiver: number,
+  seg: Segment,
+  targets: { x: number; y: number }[]
+) {
+  const active = idx[0] === striker || idx[0] === receiver ? idx[0] : idx[1];
+  const partner = active === idx[0] ? idx[1] : idx[0];
+  const b = SIDE_BOUNDS[side];
+  const ap = targets[active];
+  const ballY = clamp(seg.y1, 0.18, 0.85);
+  // If the active player is up at the net, the partner holds the back; otherwise
+  // the partner pinches forward — they swap up/back duty.
+  const deep = ap.y < 0.5;
+  const ty = deep ? clamp(ballY * 0.4 + 0.56, 0.5, 0.86) : clamp(ballY * 0.4 + 0.1, 0.18, 0.5);
+  const center = (b[0] + b[1]) / 2;
+  const tx = clamp(center + (center - ap.x) * 0.45, b[0], b[1]);
+  targets[partner] = { x: tx, y: ty };
+}
+
 function playerTargets(segments: Segment[], clock: number): { x: number; y: number }[] {
   const targets = HOME.map((h) => ({ ...h }));
   const active = segmentAt(segments, clock);
-  if (!active) return targets;
-  const { seg } = active;
+  if (active) {
+    const { seg } = active;
 
-  const hb = SIDE_BOUNDS[seg.hitter];
-  const striker = nearestOnSide(seg.hitter, seg.x0, seg.y0);
-  targets[striker] = { x: clamp(seg.x0, hb[0], hb[1]), y: clamp(seg.y0, 0.12, 0.9) };
+    const hb = SIDE_BOUNDS[seg.hitter];
+    const striker = nearestOnSide(seg.hitter, seg.x0, seg.y0);
+    targets[striker] = { x: clamp(seg.x0, hb[0], hb[1]), y: clamp(seg.y0, 0.12, 0.9) };
 
-  const rb = SIDE_BOUNDS[seg.receiver];
-  const receiver = nearestOnSide(seg.receiver, seg.x1, seg.y1);
-  if (receiver !== striker) {
-    targets[receiver] = { x: clamp(seg.x1, rb[0], rb[1]), y: clamp(seg.y1, 0.12, 0.9) };
+    const rb = SIDE_BOUNDS[seg.receiver];
+    const receiver = nearestOnSide(seg.receiver, seg.x1, seg.y1);
+    if (receiver !== striker) {
+      targets[receiver] = { x: clamp(seg.x1, rb[0], rb[1]), y: clamp(seg.y1, 0.12, 0.9) };
+    }
+
+    coverPartner("A", [0, 1], striker, receiver, seg, targets);
+    coverPartner("B", [2, 3], striker, receiver, seg, targets);
+    return targets;
+  }
+
+  // Between points: a small, per-player idle sway (distinct phase each) so the
+  // four never sit perfectly still or identically.
+  for (let i = 0; i < targets.length; i++) {
+    targets[i].x += Math.sin(clock / 620 + i * 1.7) * 0.006;
+    targets[i].y += Math.cos(clock / 540 + i * 2.3) * 0.005;
   }
   return targets;
 }
@@ -347,6 +411,21 @@ export default function MatchSim({
   const rafRef = useRef<number | null>(null);
   const posRef = useRef(HOME.map((h) => ({ ...h })));
   const audioRef = useRef<AudioContext | null>(null);
+  // Free-running celebration clock (ms since the match settled). Advances even
+  // while the main clock is frozen at the end, so the winners keep hopping and
+  // the confetti keeps falling on the held final frame.
+  const celebrateRef = useRef(0);
+
+  // Per-player easing multiplier on EASE_TAU, so the four don't move at one speed.
+  // Snappier (lower τ) for the more athletic role on each side: the front player
+  // keys off attack, the back off stamina. [A front, A back, B front, B back].
+  const verveRef = useRef<number[]>([1, 1, 1, 1]);
+  useEffect(() => {
+    const sa = liveScript.teamA.stats;
+    const sb = liveScript.teamB.stats;
+    const m = (v: number) => 1.35 - 0.65 * (clamp(v, 0, 100) / 100); // 100→0.7, 0→1.35
+    verveRef.current = [m(sa.attack), m(sa.stamina), m(sb.attack), m(sb.stamina)];
+  }, [liveScript]);
 
   playingRef.current = playing;
   speedRef.current = speed;
@@ -386,6 +465,96 @@ export default function MatchSim({
     osc.stop(t0 + durMs / 1000 + 0.03);
   };
 
+  // Like blip, but glides the pitch from f0→f1 over the note — for whooshes,
+  // whip-cracks and the tornado's swirling siren.
+  const sweep = (
+    f0: number,
+    f1: number,
+    durMs: number,
+    type: OscillatorType,
+    gain: number,
+    delayMs = 0
+  ) => {
+    const ac = audioRef.current;
+    if (!ac || mutedRef.current) return;
+    const t0 = ac.currentTime + delayMs / 1000;
+    const dur = durMs / 1000;
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t0);
+    osc.frequency.linearRampToValueAtTime(f1, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g);
+    g.connect(ac.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.03);
+  };
+
+  // Each signature move has its own voice (pitched a little lower for team B).
+  const playSkillSound = (fx: FxKind | undefined, team?: "A" | "B") => {
+    const k = team === "B" ? 0.82 : 1; // team B sits a touch lower
+    switch (fx) {
+      case "cannon":
+        blip(300 * k, 70, "square", 0.1);
+        blip(160 * k, 150, "sine", 0.24);
+        blip(90 * k, 230, "sine", 0.2, 50);
+        break;
+      case "fireserve":
+        sweep(220 * k, 760 * k, 190, "sawtooth", 0.16);
+        blip(1200 * k, 40, "square", 0.07, 150);
+        blip(1550 * k, 45, "square", 0.06, 205);
+        break;
+      case "netbreak":
+        sweep(940 * k, 200 * k, 110, "sawtooth", 0.16);
+        blip(1500 * k, 30, "square", 0.1, 0);
+        blip(170 * k, 220, "square", 0.16, 70);
+        break;
+      case "ice":
+        blip(1320 * k, 120, "sine", 0.12);
+        blip(1760 * k, 120, "sine", 0.1, 60);
+        blip(2200 * k, 170, "sine", 0.09, 120);
+        break;
+      case "vibora":
+        sweep(1700 * k, 320 * k, 90, "sawtooth", 0.14);
+        blip(2000 * k, 30, "square", 0.08, 80);
+        break;
+      case "wall":
+      case "greatwall":
+        blip(150 * k, 130, "square", 0.2);
+        blip(108 * k, 170, "square", 0.18, 85);
+        break;
+      case "tornado":
+        sweep(300 * k, 720 * k, 330, "sawtooth", 0.13);
+        sweep(360 * k, 880 * k, 330, "triangle", 0.1, 60);
+        blip(900 * k, 60, "sine", 0.08, 300);
+        break;
+      case "allcourt":
+        blip(520 * k, 50, "square", 0.1);
+        blip(700 * k, 50, "square", 0.1, 55);
+        blip(940 * k, 75, "square", 0.1, 110);
+        break;
+      case "closer":
+        blip(400 * k, 60, "square", 0.1);
+        blip(300 * k, 80, "square", 0.12, 60);
+        blip(1200 * k, 130, "sine", 0.12, 140);
+        break;
+      case "lob":
+        blip(700 * k, 80, "triangle", 0.1);
+        blip(560 * k, 110, "triangle", 0.09, 120);
+        break;
+      default: {
+        // smart play / unrecognised — the original three-step arpeggio
+        const base = team === "A" ? 660 : 500;
+        blip(base, 90, "square", 0.12);
+        blip(base * 1.25, 90, "square", 0.12, 70);
+        blip(base * 1.5, 120, "square", 0.12, 140);
+      }
+    }
+  };
+
   const playSound = (mark: SoundMark) => {
     if (mutedRef.current || !audioRef.current) return;
     switch (mark.kind) {
@@ -402,13 +571,9 @@ export default function MatchSim({
         blip(mark.team === "A" ? 720 : 540, 180, "sine", 0.18);
         blip(mark.team === "A" ? 960 : 720, 180, "sine", 0.12, 70);
         break;
-      case "skill": {
-        const base = mark.team === "A" ? 660 : 500;
-        blip(base, 90, "square", 0.12);
-        blip(base * 1.25, 90, "square", 0.12, 70);
-        blip(base * 1.5, 120, "square", 0.12, 140);
+      case "skill":
+        playSkillSound(mark.fx, mark.team);
         break;
-      }
       case "end": {
         const base = mark.team === "A" ? 523 : 440;
         blip(base, 160, "triangle", 0.18);
@@ -449,6 +614,11 @@ export default function MatchSim({
       }
       const clock = clockRef.current;
 
+      // Once the match has settled, run the celebration clock off real elapsed
+      // time (not the frozen match clock); reset it the moment play rewinds.
+      if (clock >= timeline.total) celebrateRef.current += dt;
+      else celebrateRef.current = 0;
+
       if (playingRef.current && clock > prevClock && clock - prevClock < 600) {
         for (const s of timeline.sounds) if (s.time > prevClock && s.time <= clock) playSound(s);
       }
@@ -465,18 +635,19 @@ export default function MatchSim({
       }
 
       const targets = playerTargets(timeline.segments, clock);
-      const f = 1 - Math.exp(-(dt * speedRef.current) / EASE_TAU);
       const moving: boolean[] = [];
       for (let i = 0; i < posRef.current.length; i++) {
         const cur = posRef.current[i];
-        const nx = lerp(cur.x, targets[i].x, f);
-        const ny = lerp(cur.y, targets[i].y, f);
-        moving[i] = Math.hypot(nx - cur.x, ny - cur.y) > 0.0015;
+        const tau = EASE_TAU * (verveRef.current[i] ?? 1);
+        const fi = 1 - Math.exp(-(dt * speedRef.current) / tau);
+        const nx = lerp(cur.x, targets[i].x, fi);
+        const ny = lerp(cur.y, targets[i].y, fi);
+        moving[i] = Math.hypot(nx - cur.x, ny - cur.y) > 0.0012;
         cur.x = nx;
         cur.y = ny;
       }
 
-      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started);
+      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current);
       prevClockRef.current = clock;
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -515,6 +686,7 @@ export default function MatchSim({
   const skipToResult = () => {
     clockRef.current = timeline.total;
     prevClockRef.current = timeline.total;
+    celebrateRef.current = 0;
     posRef.current = HOME.map((h) => ({ ...h }));
     setStarted(true);
     setPlaying(false);
@@ -718,6 +890,41 @@ function activeSkill(skills: SkillMark[], clock: number): SkillMark | null {
   return hit;
 }
 
+// Which live player (by index) on a side sits nearest a court point — used to pin
+// the skill's victim to whoever is closest to where the ball landed.
+function nearestIndexOnSide(
+  side: "A" | "B",
+  x: number,
+  y: number,
+  positions: { x: number; y: number }[]
+): number {
+  const idx = side === "A" ? [0, 1] : [2, 3];
+  let best = idx[0];
+  let bestD = Infinity;
+  for (const i of idx) {
+    const d = (positions[i].x - x) ** 2 + (positions[i].y - y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+// A small, decaying jitter for the screen-shake on a heavy hit.
+function shakeOffset(seed: number, amp: number): number {
+  return (Math.sin(seed * 0.7) + Math.sin(seed * 1.9)) * 0.5 * amp;
+}
+
+interface ActiveFx {
+  sk: SkillMark;
+  progress: number;
+  attIdx: number;
+  victimIdx: number;
+  knockdown: number;
+  shake: number;
+}
+
 // Draw the real-padel-court markings: surround, playing rectangle, net (with
 // posts), two service lines, and the centre service line joining them.
 function drawCourt(ctx: CanvasRenderingContext2D) {
@@ -759,17 +966,36 @@ function drawScene(
   clock: number,
   positions: { x: number; y: number }[],
   moving: boolean[],
-  started: boolean
+  started: boolean,
+  celebrate: number
 ) {
-  drawCourt(ctx);
-
   const a = script.teamA;
   const b = script.teamB;
   const avatars = [a.avatars[0], a.avatars[1], b.avatars[0], b.avatars[1]];
   const facings: (1 | -1)[] = [1, 1, -1, -1];
   const names = [a.playerName, a.proName, b.playerName, b.proName];
   const labelColors = ["#dbeee9", "#bfe0d8", "#ffe0d6", "#ffcdbe"];
-  const stepBit = Math.floor(clock / 110) % 2 === 0 ? 0 : 1;
+
+  // Resolve the active skill effect (if any) once: it drives the victim's pose,
+  // the screen shake, and the projectile overlay drawn after the players.
+  const sk = activeSkill(timeline.skills, clock);
+  let fx: ActiveFx | null = null;
+  if (sk && started) {
+    const progress = clamp((clock - sk.time) / FLASH_MS, 0, 1);
+    const attIdx = sk.team === "A" ? 0 : 2; // the front player smashes/serves the move
+    const victimIdx = nearestIndexOnSide(sk.victim, sk.vx, sk.vy, positions);
+    const dyn = fxDynamics(sk.kind, progress);
+    fx = { sk, progress, attIdx, victimIdx, knockdown: dyn.knockdown, shake: dyn.shake };
+  }
+
+  // Everything on the playing surface shakes together on a heavy hit; the
+  // scoreboard / overlays below are drawn outside this so the UI text stays put.
+  ctx.save();
+  if (fx && fx.shake > 0) {
+    ctx.translate(shakeOffset(clock, fx.shake), shakeOffset(clock + 99, fx.shake * 0.7));
+  }
+
+  drawCourt(ctx);
 
   const order = [0, 1, 2, 3].sort((i, j) => positions[i].y - positions[j].y);
   ctx.textAlign = "center";
@@ -777,19 +1003,72 @@ function drawScene(
   for (const i of order) {
     const px = cx(positions[i].x);
     const py = cy(positions[i].y);
-    drawAvatar(ctx, avatars[i], px, py, facings[i], moving[i] ? (stepBit as 0 | 1) : 0);
+    // Distinct step phase per player so their legs aren't in lock-step.
+    const stepBit: 0 | 1 = Math.floor(clock / (96 + i * 18)) % 2 === 0 ? 0 : 1;
+    let pose: AvatarPose | undefined;
+    if (fx && i === fx.victimIdx && (fx.knockdown > 0 || fx.sk.kind === "tornado")) {
+      const dir = fx.attIdx < 2 ? 1 : -1; // topple/spin away from the attacker
+      if (fx.sk.kind === "tornado") {
+        // Caught in the funnel: whirl several full turns and lift off the ground,
+        // settling back down as the effect fades — "berputar putar".
+        pose = { spin: fx.progress * Math.PI * 7 * dir, lift: Math.sin(Math.PI * fx.progress) * 8 };
+      } else if (fx.sk.kind === "ice") {
+        pose = { frost: fx.knockdown, tilt: 0.3 * fx.knockdown * dir };
+      } else {
+        pose = { tilt: (Math.PI / 2 - 0.15) * fx.knockdown * dir };
+        // brief white flash right at the moment of impact
+        if (fx.knockdown < 0.5) pose.flash = (0.5 - fx.knockdown) * 1.2;
+      }
+    } else if (celebrate > 0) {
+      // Match over: the winning pair leap with arms up; the losers crumple to
+      // the floor and cry. Winner indices are [0,1] for A, [2,3] for B.
+      const won = script.winner === "A" ? i < 2 : i >= 2;
+      if (won) {
+        const hop = Math.max(0, Math.sin(celebrate / 165 + i * 1.3));
+        pose = { lift: hop * 9, cheer: 1 };
+      } else {
+        const fall = clamp(celebrate / 420, 0, 1);
+        const dir = i < 2 ? -1 : 1; // topple toward each side's back wall
+        pose = {
+          tilt: (Math.PI / 2 - 0.12) * fall * dir,
+          tears: clamp((celebrate - 200) / 600, 0, 1),
+        };
+      }
+    }
+    drawAvatar(ctx, avatars[i], px, py, facings[i], moving[i] ? stepBit : 0, pose);
     ctx.fillStyle = labelColors[i];
     ctx.fillText(names[i], px, py + 22);
   }
 
-  // Ball + shadow.
-  const ball = ballAt(timeline.segments, clock);
-  const bx = cx(ball.x);
-  const by = cy(ball.y);
-  ctx.fillStyle = "rgba(0,0,0,0.22)";
-  ctx.fillRect(Math.round(bx) - 1, Math.round(by) + 3, 3, 1);
-  ctx.fillStyle = "#e8f94a";
-  ctx.fillRect(Math.round(bx) - 1, Math.round(by) - 1, 3, 3);
+  // Ball + shadow (hidden once the point's dead and the celebration takes over).
+  if (celebrate === 0) {
+    const ball = ballAt(timeline.segments, clock);
+    const bx = cx(ball.x);
+    const by = cy(ball.y);
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.fillRect(Math.round(bx) - 1, Math.round(by) + 3, 3, 1);
+    ctx.fillStyle = "#e8f94a";
+    ctx.fillRect(Math.round(bx) - 1, Math.round(by) - 1, 3, 3);
+  }
+
+  // Skill effect overlay (projectiles, particles, impact) on top of the players.
+  if (fx) {
+    const geom = {
+      ax: cx(positions[fx.attIdx].x),
+      ay: cy(positions[fx.attIdx].y),
+      vx: cx(positions[fx.victimIdx].x),
+      vy: cy(positions[fx.victimIdx].y),
+    };
+    const color = fx.sk.team === "A" ? "#7fe6cf" : "#ff9d85";
+    drawSkillFx(ctx, fx.sk.kind, fx.progress, geom, color, fx.sk.time);
+  }
+
+  ctx.restore();
+
+  // Confetti rains over the held final frame while the winners celebrate.
+  if (celebrate > 0) {
+    drawConfetti(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
+  }
 
   // Scoreboard.
   const { a: sa, b: sb } = currentScore(timeline.scores, clock);
@@ -809,8 +1088,7 @@ function drawScene(
   // (The real player faces are shown in the React header above the court — see
   // MatchSim — so we don't draw a generated portrait by the scoreboard here.)
 
-  // Skill flash.
-  const sk = activeSkill(timeline.skills, clock);
+  // Skill name flash (reuses the effect resolved above).
   if (sk) {
     ctx.textAlign = "center";
     ctx.font = "bold 13px ui-monospace, monospace";
