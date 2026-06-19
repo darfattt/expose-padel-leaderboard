@@ -42,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/matrix" className="hover:text-ink">Matrix</Link>
             <Link href="/scatter" className="hover:text-ink">Scatter</Link>
             <Link href="/versus" className="hover:text-ink">Versus</Link>
+            <Link href="/tournament" className="hover:text-ink">Tournament</Link>
             <Link href="/rackets" className="hover:text-ink">Rackets</Link>
             <Link href="/events" className="hover:text-ink">Events</Link>
             <Link href="/how-it-works" className="hover:text-ink">How it works</Link>

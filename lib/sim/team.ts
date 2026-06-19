@@ -81,13 +81,22 @@ export interface TeamPlayer {
 // Build one side's team spec. The pro lookalike is the top candidate from
 // proCandidates (rank-appropriate to the rating, rotated by archetype); its rank
 // is the best (numerically lowest) offered, which is exactly candidates.pros[0].
-export function buildTeam(player: TeamPlayer, side: "A" | "B", color: string): TeamSpec {
+//
+// `forcedPro` overrides the auto-pick — the tournament uses it to hand a team a
+// *specific* (already de-duplicated) pro partner so no two teams in the same
+// bracket field share a lookalike (see lib/sim/tournament.ts assignPros).
+export function buildTeam(
+  player: TeamPlayer,
+  side: "A" | "B",
+  color: string,
+  forcedPro?: { name: string; rank: number }
+): TeamSpec {
   // The pro lookalike (and so the partner's name + sprite) is drawn from the
   // gender-appropriate FIP ladder — a women's player gets a women's pro, not the
   // men's default. The same gender drives both on-court sprites' look.
   const candidates = proCandidates(player.rating, player.archetypePrimary, player.gender);
-  const proName = candidates.pros[0] ?? "Unknown Pro";
-  const proRank = candidates.rankLow || 90;
+  const proName = forcedPro?.name ?? candidates.pros[0] ?? "Unknown Pro";
+  const proRank = forcedPro?.rank ?? candidates.rankLow ?? 90;
   // The player's gender pins both sprites' look; undefined leaves it name-derived
   // (so older callers without a gender are unchanged).
   const avatarGender = player.gender ?? undefined;

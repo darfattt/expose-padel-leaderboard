@@ -57,6 +57,17 @@ export function proPhoto(name: string): string | undefined {
   return PHOTO_BY_NAME.get(name) ?? PHOTO_BY_NAME.get(name.trim());
 }
 
+// Combined name→rank lookup across both ladders, so a caller that only knows a
+// pro's name (e.g. the tournament's pro de-duplication) can recover their FIP
+// rank. Names are distinct between the men's and women's lists.
+const RANK_BY_NAME = new Map<string, number>();
+for (const pros of Object.values(PROS_BY_GENDER))
+  for (const p of pros) if (!RANK_BY_NAME.has(p.name)) RANK_BY_NAME.set(p.name, p.rank);
+
+export function proRank(name: string): number | null {
+  return RANK_BY_NAME.get(name) ?? RANK_BY_NAME.get(name.trim()) ?? null;
+}
+
 // Playstyle flavor per archetype — used only to colour the model's reasoning,
 // since the rank-90 source carries no style metadata.
 const ARCHETYPE_NOTES: Record<AttributeKey | "balanced", string> = {
@@ -99,19 +110,23 @@ const TOUR_LABEL: Record<Gender, string> = { male: "men's", female: "women's" };
 export function proCandidates(
   rating: number,
   archetypeKey: AttributeKey | "balanced",
-  gender: Gender | null = "male"
+  gender: Gender | null = "male",
+  // How many candidates to return. Defaults to PICKS for the report; callers that
+  // need to de-duplicate across a whole field (the tournament) ask for more, and
+  // the rank window widens to match so the extra picks stay rank-appropriate.
+  picks: number = PICKS
 ): ProCandidates {
   const pros = PROS_BY_GENDER[gender ?? "male"];
   const n = pros.length;
   const clamped = Math.min(7, Math.max(0, rating));
   const center = Math.round((1 - clamped / 7) * (n - 1));
-  const size = Math.min(WINDOW, n);
+  const size = Math.min(Math.max(WINDOW, picks), n);
   const start = Math.min(Math.max(center - Math.floor(size / 2), 0), n - size);
   const window = pros.slice(start, start + size);
 
   const seed = ARCHETYPE_SEED[archetypeKey] ?? 0;
   const picked: Pro[] = [];
-  for (let i = 0; i < Math.min(PICKS, window.length); i++) {
+  for (let i = 0; i < Math.min(picks, window.length); i++) {
     picked.push(window[(i + seed) % window.length]);
   }
 

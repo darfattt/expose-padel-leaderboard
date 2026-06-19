@@ -366,6 +366,11 @@ export default function MatchSim({
   avatarB,
   locked = false,
   lockedNotice,
+  deathSide,
+  onEnded,
+  autoPlay = false,
+  collapsibleCommentary = false,
+  commentaryDefaultOpen = true,
 }: {
   script: MatchScript;
   nameA?: string;
@@ -376,6 +381,21 @@ export default function MatchSim({
   // but playback is locked: the controls give way to an explanatory notice.
   locked?: boolean;
   lockedNotice?: ReactNode;
+  // Tournament gearless rule: the side with no racket "dies when the ball is
+  // hit" — they crumple on every contact (their team is already calibrated to a
+  // shutout). Undefined for a normal, evenly-kitted match.
+  deathSide?: "A" | "B";
+  // Fired once when the match clock reaches the end — the tournament arena uses
+  // it to reveal the "advance" control after your match settles.
+  onEnded?: () => void;
+  // Start playing on mount (used when the arena swaps to the next final game).
+  autoPlay?: boolean;
+  // Let the user fold away the side commentary feed so the court takes the full
+  // width (a bigger pitch) and the page below — e.g. the tournament bracket — is
+  // reachable with less scrolling on mobile. The live caption over the court
+  // stays either way. The tournament collapses it by default.
+  collapsibleCommentary?: boolean;
+  commentaryDefaultOpen?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logBoxRef = useRef<HTMLDivElement>(null);
@@ -410,6 +430,11 @@ export default function MatchSim({
   const [ended, setEnded] = useState(false);
   const [muted, setMuted] = useState(false);
   const [revealed, setRevealed] = useState(0);
+  // Whether the side commentary feed is shown. Always on when not collapsible
+  // (the Versus tape); the tournament starts it folded for a bigger court.
+  const [showCommentary, setShowCommentary] = useState(
+    collapsibleCommentary ? commentaryDefaultOpen : true
+  );
 
   const clockRef = useRef(0);
   const prevClockRef = useRef(0);
@@ -692,7 +717,7 @@ export default function MatchSim({
         cur.y = ny;
       }
 
-      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current, locked);
+      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current, locked, deathSide);
       prevClockRef.current = clock;
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -702,13 +727,31 @@ export default function MatchSim({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       lastTsRef.current = null;
     };
-  }, [liveScript, timeline, started, locked]);
+  }, [liveScript, timeline, started, locked, deathSide]);
 
   // Auto-scroll the commentary feed as new lines land.
   useEffect(() => {
     const box = logBoxRef.current;
     if (box) box.scrollTop = box.scrollHeight;
   }, [revealed]);
+
+  // Tell the parent once, the moment this match settles (the arena reveals its
+  // "advance" / "next game" control off this). Re-armed on replay/rematch.
+  const endedNotified = useRef(false);
+  useEffect(() => {
+    if (ended && !endedNotified.current) {
+      endedNotified.current = true;
+      onEnded?.();
+    }
+    if (!ended) endedNotified.current = false;
+  }, [ended, onEnded]);
+
+  // Kick off automatically when asked (a fresh game in a best-of-three series).
+  useEffect(() => {
+    if (autoPlay && !locked) play();
+    // Mount-only: a new game arrives as a fresh component (keyed by the arena).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const play = () => {
     ensureAudio();
@@ -761,7 +804,7 @@ export default function MatchSim({
   const labelB = nameB ?? script.teamB.playerName;
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
+    <div className={`grid grid-cols-1 gap-5 ${showCommentary ? "lg:grid-cols-[1.4fr_1fr]" : ""}`}>
       <div>
         {/* Real player faces flanking the court — the on-court figures are 8-bit
             sprites, so this is where the actual Reclub photos show. */}
@@ -866,11 +909,22 @@ export default function MatchSim({
           <button type="button" onClick={() => setMuted((m) => !m)} className="btn-secondary" aria-pressed={muted}>
             {muted ? "🔇 Muted" : "🔊 Sound"}
           </button>
+          {collapsibleCommentary && (
+            <button
+              type="button"
+              onClick={() => setShowCommentary((v) => !v)}
+              className="btn-secondary"
+              aria-expanded={showCommentary}
+            >
+              {showCommentary ? "💬 Hide commentary" : "💬 Commentary"}
+            </button>
+          )}
         </div>
         )}
       </div>
 
       {/* Live commentary feed */}
+      {showCommentary && (
       <div>
         <p className="mono-label mb-2">Match commentary</p>
         <div
@@ -904,6 +958,7 @@ export default function MatchSim({
           <SkillLegend team={script.teamB} />
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -1024,7 +1079,8 @@ function drawScene(
   moving: boolean[],
   started: boolean,
   celebrate: number,
-  locked = false
+  locked = false,
+  deathSide?: "A" | "B"
 ) {
   const a = script.teamA;
   const b = script.teamB;
@@ -1032,6 +1088,16 @@ function drawScene(
   const facings: (1 | -1)[] = [1, 1, -1, -1];
   const names = [a.playerName, a.proName, b.playerName, b.proName];
   const labelColors = ["#dbeee9", "#bfe0d8", "#ffe0d6", "#ffcdbe"];
+
+  // Gearless death: while the ball is travelling to the doomed side, the player
+  // about to receive it crumples (they have no racket — every contact is fatal).
+  let deathIdx = -1;
+  if (deathSide && started && celebrate === 0) {
+    const active = segmentAt(timeline.segments, clock);
+    if (active && active.seg.receiver === deathSide) {
+      deathIdx = nearestIndexOnSide(deathSide, active.seg.x1, active.seg.y1, positions);
+    }
+  }
 
   // Resolve the active skill effect (if any) once: it drives the victim's pose,
   // the screen shake, and the projectile overlay drawn after the players.
@@ -1102,10 +1168,20 @@ function drawScene(
           tears: clamp((celebrate - 200) / 600, 0, 1),
         };
       }
+    } else if (i === deathIdx) {
+      // Doomed gearless receiver: topple toward their own back wall with a flash
+      // of impact and tears — they "die when the ball is hit".
+      const dir = i < 2 ? -1 : 1;
+      pose = { tilt: (Math.PI / 2 - 0.1) * dir, flash: 0.5, tears: 1 };
     }
     drawAvatar(ctx, avatars[i], px, py, facings[i], moving[i] ? stepBit : 0, pose);
     ctx.fillStyle = labelColors[i];
     ctx.fillText(names[i], px, py + 22);
+    if (i === deathIdx) {
+      ctx.font = "9px ui-monospace, monospace";
+      ctx.fillText("💀", px, py - 12);
+      ctx.font = "6px ui-monospace, monospace";
+    }
   }
 
   // Ball + shadow (hidden once the point's dead and the celebration takes over).

@@ -107,6 +107,23 @@ export async function getPlayerGear(id: string): Promise<PlayerGear> {
   }
 }
 
+// The ids of every player who has a racket on file — a single cheap query so
+// the tournament can prioritise geared entrants without fetching each player's
+// full gear row. Empty set when Supabase isn't configured.
+export async function getGearedPlayerIds(): Promise<Set<string>> {
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("players")
+      .select("id, racket_slug")
+      .not("racket_slug", "is", null);
+    if (error) throw error;
+    return new Set((data ?? []).map((r) => r.id as string));
+  } catch {
+    return new Set();
+  }
+}
+
 // A player's Reclub profile link + cached avatar. Empty fields when unset or
 // Supabase isn't configured, so the editor renders an empty state.
 export interface PlayerReclub {
