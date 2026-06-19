@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getRacketRating } from "@/app/actions/player";
 import PlayerAvatar from "@/app/components/PlayerAvatar";
 import { type Achievement, type AchievementContext, computeAchievements } from "@/lib/achievements";
 import { h2hHook } from "@/lib/gossip";
@@ -7,9 +8,7 @@ import { levelForRating } from "@/lib/levels";
 import {
   getPlayerGear,
   getPlayerMatchHistory,
-  getPlayerRackets,
   getPlayerReclub,
-  getPlayerReclubProfiles,
   type MatchHistoryEntry,
 } from "@/lib/queries";
 import { avatarFor } from "@/lib/reclub-avatar";
@@ -30,27 +29,16 @@ export default async function VersusPage({
   searchParams: Promise<{ a?: string; b?: string }>;
 }) {
   const { a: aId, b: bId } = await searchParams;
-  const [board, rackets, reclubProfiles] = await Promise.all([
-    getLeaderboard(),
-    getPlayerRackets(),
-    getPlayerReclubProfiles(),
-  ]);
-  // Only players who have both set their gear (a racket) and linked a Reclub
-  // profile may run the simulation — the sim leans on real gear and faces.
-  const isEligible = (id: string) => rackets.has(id) && reclubProfiles.has(id);
-  const eligible = board.filter((p) => isEligible(p.row.player_id));
+  const board = await getLeaderboard();
 
+  // Anyone can be put on the tale of the tape — ratings, form and head-to-head
+  // need no gear. The match simulation alone is gated (on gear) inside <Tape>.
   const playerA = aId ? board.find((p) => p.row.player_id === aId) ?? null : null;
   const playerB = bId ? board.find((p) => p.row.player_id === bId) ?? null : null;
-  // A chosen player who isn't eligible blocks the tape and earns an explanation.
-  const ineligible = [playerA, playerB].filter(
-    (p): p is RankedPlayer => p != null && !isEligible(p.row.player_id)
-  );
   const ready =
     playerA &&
     playerB &&
-    playerA.row.player_id !== playerB.row.player_id &&
-    ineligible.length === 0;
+    playerA.row.player_id !== playerB.row.player_id;
 
   return (
     <div>
@@ -66,20 +54,13 @@ export default async function VersusPage({
         </p>
       </section>
 
-      <Picker board={eligible} aId={playerA?.row.player_id} bId={playerB?.row.player_id} />
+      <Picker board={board} aId={playerA?.row.player_id} bId={playerB?.row.player_id} />
 
       {ready ? (
         <Tape playerA={playerA} playerB={playerB} board={board} />
-      ) : ineligible.length > 0 ? (
+      ) : board.length < 2 ? (
         <p className="text-body-muted mt-10 text-sm">
-          {ineligible.map((p) => p.row.name).join(" and ")}{" "}
-          {ineligible.length > 1 ? "aren't" : "isn't"} ready for the simulation yet — a player needs
-          both a racket and a linked Reclub profile on their page before they can step on court.
-        </p>
-      ) : eligible.length < 2 ? (
-        <p className="text-body-muted mt-10 text-sm">
-          Need at least two players with a racket and a linked Reclub profile. Set gear and link
-          Reclub on the player pages to unlock the simulation.
+          Need at least two players to compare.
         </p>
       ) : (
         <p className="text-body-muted mt-10 text-sm">
@@ -166,10 +147,14 @@ async function Tape({
     getPlayerReclub(bId),
   ]);
   // Resolve each player's real Reclub photo (stored, else scraped from their
-  // profile) so the sim shows actual faces, not just generated sprites.
-  const [avatarA, avatarB] = await Promise.all([
+  // profile) so the sim shows actual faces, not just generated sprites — and the
+  // catalogue review score of each racket, so a stronger frame tilts the sim
+  // (higher gear, more power). Both are cached daily; missing → null (neutral).
+  const [avatarA, avatarB, gearRatingA, gearRatingB] = await Promise.all([
     avatarFor(reclubA.url, reclubA.avatarUrl),
     avatarFor(reclubB.url, reclubB.avatarUrl),
+    gearA.racketSlug ? getRacketRating(gearA.racketSlug) : Promise.resolve(null),
+    gearB.racketSlug ? getRacketRating(gearB.racketSlug) : Promise.resolve(null),
   ]);
 
   const formA = computeForm(matchesA);
@@ -180,6 +165,14 @@ async function Tape({
     games: record.games,
   });
   const common = commonOpponents(matchesA, matchesB, aId, bId);
+
+  // The simulated match leans on real gear, so it's the one thing gated: both
+  // players must have a racket set up. The rest of the tape works for anyone.
+  const canSimulate = Boolean(gearA.racketName) && Boolean(gearB.racketName);
+  const needsGear = [
+    !gearA.racketName ? playerA.row.name : null,
+    !gearB.racketName ? playerB.row.name : null,
+  ].filter((n): n is string => n != null);
 
   // Field context shared by the morale (badge) signal below: who's top-3, and
   // every player's rating, so the achievement engine can judge upsets/rank.
@@ -194,8 +187,8 @@ async function Tape({
   // attributes, gear, ladder rank, experience, form and earned badges — so all of
   // those move the sim, not just the rating gap. Replayed by the client <MatchSim>.
   const script = scriptForMatchup({
-    a: simPlayer(playerA, formWinRate(formA), gearA, matchesA, { ratingById, topRankIds, rankedCount }, !!reclubA.url),
-    b: simPlayer(playerB, formWinRate(formB), gearB, matchesB, { ratingById, topRankIds, rankedCount }, !!reclubB.url),
+    a: simPlayer(playerA, formWinRate(formA), gearA, gearRatingA, matchesA, { ratingById, topRankIds, rankedCount }, !!reclubA.url),
+    b: simPlayer(playerB, formWinRate(formB), gearB, gearRatingB, matchesB, { ratingById, topRankIds, rankedCount }, !!reclubB.url),
     aId,
     bId,
     ratingA: playerA.rating,
@@ -251,34 +244,53 @@ async function Tape({
         )}
       </div>
 
-      {/* 2D match simulation — the arcade replay of the full-picture edge */}
+      {/* 2D match simulation — the arcade replay of the full-picture edge. The
+          court always shows so the feature is visible; playback is gated on gear
+          (a player without a racket can't step on court). */}
       <section className="mt-14">
-        {/* <div className="flex items-baseline justify-between mb-3">
-          <p className="mono-label">The tape · 8-bit replay</p>
-          <span className="text-muted text-xs">
-            {playerA.row.name}  vs {playerB.row.name}
-          </span>
-        </div> */}
         <MatchSim
           script={script}
           nameA={playerA.row.name}
           nameB={playerB.row.name}
           avatarA={avatarA}
           avatarB={avatarB}
+          locked={!canSimulate}
+          lockedNotice={
+            <>
+              <p className="mono-label mb-1 text-coral">Match simulation locked</p>
+              <p className="text-body-muted text-sm">
+                {needsGear.join(" and ")} can&apos;t play a simulated match yet. Please set up their
+                gear first — pick a racket on the{" "}
+                {needsGear.length > 1 ? (
+                  "player pages"
+                ) : (
+                  <Link
+                    href={`/players/${!gearA.racketName ? aId : bId}`}
+                    className="text-ink underline hover:opacity-70"
+                  >
+                    player page
+                  </Link>
+                )}{" "}
+                to unlock the match.
+              </p>
+            </>
+          }
         />
-        {script.edge && (
+        {canSimulate && script.edge && (
           <EdgeBreakdown
             edge={script.edge}
             nameA={playerA.row.name}
             nameB={playerB.row.name}
           />
         )}
-        <p className="text-muted text-xs mt-3">
-          The replay weighs more than rating: attributes, gear, ladder rank, experience, recent
-          form and earned badges all tilt the court. Momentum, clutch on the big points and stamina
-          late then shape how each rally plays out — so every <span className="font-medium">Rematch</span>{" "}
-          tells a different story while the odds stay honest.
-        </p>
+        {canSimulate && (
+          <p className="text-muted text-xs mt-3">
+            The replay weighs more than rating: attributes, gear, ladder rank, experience, recent
+            form and earned badges all tilt the court. Momentum, clutch on the big points and stamina
+            late then shape how each rally plays out — so every <span className="font-medium">Rematch</span>{" "}
+            tells a different story while the odds stay honest.
+          </p>
+        )}
       </section>
 
       {/* Attribute overlay */}
@@ -559,6 +571,7 @@ function simPlayer(
   player: RankedPlayer,
   form: number,
   gear: PlayerGear,
+  gearRating: number | null,
   matches: MatchHistoryEntry[],
   field: { ratingById: Map<string, number>; topRankIds: Set<string>; rankedCount: number },
   reclubLinked: boolean
@@ -571,6 +584,7 @@ function simPlayer(
     hasRacket: Boolean(gear.racketName),
     racketName: gear.racketName,
     racketBrand: gear.racketBrand,
+    gearRating,
     rank: player.rank,
     fieldSize: field.rankedCount,
     experienceGames: player.row.games,

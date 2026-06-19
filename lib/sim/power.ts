@@ -22,6 +22,7 @@ export interface PowerInput {
   experienceGames: number; // career games played (veterancy / steadiness)
   hasRacket: boolean; // a racket is registered in their profile
   racketStyle: RacketPlayStyle | null; // computed play-style of that racket
+  gearRating?: number | null; // the racket's catalogue review score (0–10); higher = a stronger weapon
   form: number; // recent win rate in [0,1]; 0.5 = neutral / unknown
   morale: number; // earned good badges minus bad badges (raw, signed)
 }
@@ -58,6 +59,17 @@ const WEIGHT = {
 // ~±1.6 logit ≈ enough to turn a 50/50 into ~83/17, or claw a 70/30 back to even.
 const MAX_SWING = 1.6;
 
+// Gear scoring. A registered racket is a flat baseline edge (you've dialled in
+// your kit); a power frame leans into winners, a control frame into retrieval;
+// and the better the frame — its catalogue review score — the more it adds, so a
+// top-rated weapon out-guns a budget paddle.
+const GEAR_BASE = 0.6; // owning any racket
+// Catalogue review scores for real frames cluster high, so anchor the quality
+// bonus at this floor (a rating at/below it adds nothing) and let a perfect 10
+// add the full GEAR_QUALITY_MAX on top.
+const GEAR_RATING_FLOOR = 5;
+const GEAR_QUALITY_MAX = 0.8;
+
 function clampProb(p: number): number {
   return Math.min(1 - 1e-4, Math.max(1e-4, p));
 }
@@ -82,12 +94,23 @@ export function overallAttribute(a: Attributes): number {
   );
 }
 
-// Gear score: having a racket on file is a small, real edge (you've dialled in
-// your kit); a power frame leans into winners, a control frame into retrieval.
+// A racket's catalogue review score (0–10) → a quality bonus on top of simply
+// owning a frame: the higher the gear, the more powerful. Unknown rating (older
+// gear, or a frame off the catalogue) adds nothing, so the edge falls back to the
+// flat base — no one is penalised for a missing score.
+function gearQuality(rating: number | null | undefined): number {
+  if (rating == null || !Number.isFinite(rating)) return 0;
+  const r = Math.min(10, Math.max(0, rating));
+  return (Math.max(0, r - GEAR_RATING_FLOOR) / (10 - GEAR_RATING_FLOOR)) * GEAR_QUALITY_MAX;
+}
+
+// Gear score: having a racket on file is a real edge (you've dialled in your
+// kit); a power frame leans into winners, a control frame into retrieval; and a
+// better-rated frame adds more still — higher gear, more power.
 function gearScore(input: PowerInput): number {
   if (!input.hasRacket) return 0;
   const styleBonus = input.racketStyle === "power" ? 0.2 : input.racketStyle === "control" ? 0.12 : 0.06;
-  return 0.6 + styleBonus;
+  return GEAR_BASE + styleBonus + gearQuality(input.gearRating);
 }
 
 // Experience: diminishing returns on career games — the first season teaches you
@@ -147,16 +170,18 @@ export function computeMatchEdge(a: PowerInput, b: PowerInput, baseTarget: numbe
     WEIGHT.attributes * ((attrA - attrB) / 100)
   );
 
-  // Gear — the racket in the bag.
+  // Gear — the racket in the bag, weighed by how good a frame it is.
+  const gearA = gearScore(a);
+  const gearB = gearScore(b);
   push(
     "gear",
     "Gear",
-    gearScore(a) === gearScore(b)
+    gearA === gearB
       ? "Evenly kitted"
-      : gearScore(a) > gearScore(b)
-        ? "Better-suited frame in hand"
+      : gearA > gearB
+        ? "Stronger frame in hand"
         : "Out-gunned on equipment",
-    WEIGHT.gear * (gearScore(a) - gearScore(b))
+    WEIGHT.gear * (gearA - gearB)
   );
 
   // Experience — games in the legs.

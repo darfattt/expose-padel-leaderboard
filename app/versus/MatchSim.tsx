@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import PlayerAvatar from "@/app/components/PlayerAvatar";
 import { buildMatchScript, type MatchScript } from "@/lib/sim/engine";
 import type { TeamSpec } from "@/lib/sim/team";
@@ -361,12 +361,18 @@ export default function MatchSim({
   nameB,
   avatarA,
   avatarB,
+  locked = false,
+  lockedNotice,
 }: {
   script: MatchScript;
   nameA?: string;
   nameB?: string;
   avatarA?: string | null; // real Reclub photo for team A's human player
   avatarB?: string | null; // real Reclub photo for team B's human player
+  // When a player lacks gear the court still shows (so the feature is visible),
+  // but playback is locked: the controls give way to an explanatory notice.
+  locked?: boolean;
+  lockedNotice?: ReactNode;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logBoxRef = useRef<HTMLDivElement>(null);
@@ -671,7 +677,7 @@ export default function MatchSim({
         cur.y = ny;
       }
 
-      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current);
+      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current, locked);
       prevClockRef.current = clock;
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -681,7 +687,7 @@ export default function MatchSim({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       lastTsRef.current = null;
     };
-  }, [liveScript, timeline, started]);
+  }, [liveScript, timeline, started, locked]);
 
   // Auto-scroll the commentary feed as new lines land.
   useEffect(() => {
@@ -795,7 +801,13 @@ export default function MatchSim({
           </span>
         </div>
 
-        {/* Controls */}
+        {/* Controls — or, when a player has no gear, a highlighted locked notice
+            in their place (the court above stays visible so the feature reads). */}
+        {locked ? (
+          <div className="mt-3 rounded-sm border border-coral/40 bg-coral/10 px-4 py-3">
+            {lockedNotice}
+          </div>
+        ) : (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {!started ? (
             <button type="button" onClick={play} className="btn-primary">
@@ -840,6 +852,7 @@ export default function MatchSim({
             {muted ? "🔇 Muted" : "🔊 Sound"}
           </button>
         </div>
+        )}
       </div>
 
       {/* Live commentary feed */}
@@ -850,7 +863,11 @@ export default function MatchSim({
           className="h-[260px] overflow-y-auto rounded-sm border border-hairline bg-canvas p-3 text-sm"
         >
           {revealed === 0 ? (
-            <p className="text-muted">Press play to start the match — the call comes in live.</p>
+            <p className="text-muted">
+              {locked
+                ? "Both players need their gear set before the match can be called."
+                : "Press play to start the match — the call comes in live."}
+            </p>
           ) : (
             <ul className="space-y-1.5">
               {timeline.log.slice(0, revealed).map((e, i) => (
@@ -991,7 +1008,8 @@ function drawScene(
   positions: { x: number; y: number }[],
   moving: boolean[],
   started: boolean,
-  celebrate: number
+  celebrate: number,
+  locked = false
 ) {
   const a = script.teamA;
   const b = script.teamB;
@@ -1127,14 +1145,19 @@ function drawScene(
     ctx.fillText(`✦ ${sk.name} ✦`, W / 2, 38);
   }
 
-  // Pre-start poster prompt.
+  // Pre-start poster prompt. Locked (a player has no gear) → a padlock prompt;
+  // otherwise the usual call to press play.
   if (!started) {
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.fillRect(0, H / 2 - 16, W, 32);
     ctx.textAlign = "center";
     ctx.font = "bold 13px ui-monospace, monospace";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText("Press play to simulate the match", W / 2, H / 2 + 4);
+    ctx.fillText(
+      locked ? "🔒 Set up gear to unlock this match" : "Press play to simulate the match",
+      W / 2,
+      H / 2 + 4
+    );
   }
 
   // Outcome banner once finished — framed from your side (team A): you win, or

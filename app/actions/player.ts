@@ -98,6 +98,14 @@ function toRecommendation(r: PadelfulRecommendation): RacketRecommendation {
 interface RacketDetail {
   image: string | null;
   shape: string | null;
+  rating: number | null; // Padelful's 0–10 review score
+}
+
+// Coerce the catalogue's rating (string | number) to a finite number, or null.
+function parseRating(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null;
+  const n = typeof raw === "number" ? raw : parseFloat(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 const fetchRacketDetail = unstable_cache(
@@ -107,16 +115,17 @@ const fetchRacketDetail = unstable_cache(
         headers: { accept: "application/json" },
         next: { revalidate: 86_400 },
       });
-      if (!res.ok) return { image: null, shape: null };
+      if (!res.ok) return { image: null, shape: null, rating: null };
       const json = (await res.json()) as {
-        data?: { racket?: { image?: string | null; shape?: string | null } };
+        data?: { racket?: { image?: string | null; shape?: string | null; rating?: string | number | null } };
       };
       return {
         image: toAbsoluteImage(json.data?.racket?.image),
         shape: json.data?.racket?.shape ?? null,
+        rating: parseRating(json.data?.racket?.rating),
       };
     } catch {
-      return { image: null, shape: null };
+      return { image: null, shape: null, rating: null };
     }
   },
   ["racket-detail"],
@@ -128,6 +137,14 @@ const fetchRacketDetail = unstable_cache(
 // any miss (the contrast line simply isn't drawn).
 export async function getRacketShape(slug: string): Promise<string | null> {
   return (await fetchRacketDetail(slug)).shape;
+}
+
+// Padelful's 0–10 review score for a single racket slug, so a player's own frame
+// can be weighed in the match sim — a better-rated weapon out-guns a budget
+// paddle (see lib/sim/power.ts). Null on any miss, so the gear edge falls back to
+// simply owning a racket.
+export async function getRacketRating(slug: string): Promise<number | null> {
+  return (await fetchRacketDetail(slug)).rating;
 }
 
 // POST is not cached by Next's fetch Data Cache, so cache the result ourselves

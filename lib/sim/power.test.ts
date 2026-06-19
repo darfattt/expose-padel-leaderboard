@@ -59,6 +59,20 @@ describe("computeMatchEdge", () => {
     expect(edge.factors.find((f) => f.key === "gear")?.delta).toBeGreaterThan(0);
   });
 
+  it("higher gear is more powerful: a better-rated frame out-guns a lesser one", () => {
+    const gearDelta = (over: Partial<PowerInput>) =>
+      computeMatchEdge(input({ hasRacket: true, ...over }), input({ hasRacket: true }), 0.5).factors.find(
+        (f) => f.key === "gear"
+      )?.delta ?? 0;
+    // Both armed; quality climbs monotonically: top frame > mid frame > unrated.
+    expect(gearDelta({ gearRating: 9.5 })).toBeGreaterThan(gearDelta({ gearRating: 7 }));
+    expect(gearDelta({ gearRating: 7 })).toBeGreaterThan(gearDelta({})); // 7/10 frame beats an unrated one
+    // A top-rated weapon lifts A's win chance outright over an identical bare-handed prior.
+    expect(
+      computeMatchEdge(input({ hasRacket: true, gearRating: 9.5 }), input({ hasRacket: true }), 0.5).target
+    ).toBeGreaterThan(0.5);
+  });
+
   it("more experience, hotter form and a fuller badge wall each favour A", () => {
     expect(computeMatchEdge(input({ experienceGames: 300 }), input({ experienceGames: 2 }), 0.5).target).toBeGreaterThan(0.5);
     expect(computeMatchEdge(input({ form: 1 }), input({ form: 0 }), 0.5).target).toBeGreaterThan(0.5);

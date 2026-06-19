@@ -68,6 +68,7 @@ export interface TeamPlayer {
   hasRacket: boolean; // whether the player has a racket set in their gear
   racketName?: string | null; // model name, for personalised gear-skill labels
   racketBrand?: string | null; // brand, trimmed from the moniker when redundant
+  gearRating?: number | null; // racket's catalogue review score (0–10); higher = stronger weapon
   rank?: number | null; // leaderboard rank (1 = best); null/undefined = provisional
   fieldSize?: number; // size of the ranked field, to normalize rank
   experienceGames?: number; // career games played (veterancy → stamina + edge)
@@ -116,6 +117,7 @@ export function powerInput(player: TeamPlayer): PowerInput {
     experienceGames: player.experienceGames ?? 0,
     hasRacket: player.hasRacket,
     racketStyle: player.hasRacket ? racketPlayStyle(player.attributes) : null,
+    gearRating: player.gearRating ?? null,
     form: player.form ?? 0.5,
     morale: player.morale ?? 0,
   };
