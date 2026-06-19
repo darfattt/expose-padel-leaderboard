@@ -453,6 +453,7 @@ describe("computeAchievements — gear & setup", () => {
   });
   const fullGear = {
     position: "Right" as const,
+    gender: null,
     racketSlug: "babolat-air-viper",
     racketName: "Air Viper",
     racketBrand: "Babolat",
@@ -511,6 +512,7 @@ describe("computeAchievements — gear vs the field", () => {
   });
   const gearOf = (slug: string) => ({
     position: null,
+    gender: null,
     racketSlug: slug,
     racketName: slug,
     racketBrand: "BrandX",

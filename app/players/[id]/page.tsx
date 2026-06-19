@@ -16,6 +16,7 @@ import AchievementsCard from "./AchievementsCard";
 import AttributeRadar from "./AttributeRadar";
 import FormStrip from "./FormStrip";
 import GearCard from "./GearCard";
+import GenderCard from "./GenderCard";
 import PlayerAvatar from "@/app/components/PlayerAvatar";
 import ReclubCard from "./ReclubCard";
 import RatingHistogram from "@/app/trends/RatingHistogram";
@@ -58,6 +59,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
           <ReclubCard playerId={id} initial={reclubResolved} />
           <GearCard playerId={id} initial={gear} />
+          <GenderCard playerId={id} initial={gear.gender} />
         </div>
       </div>
     );
@@ -146,6 +148,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         <div className="flex flex-wrap items-end gap-x-8 gap-y-6">
           <ReclubCard playerId={id} initial={reclubResolved} />
           <GearCard playerId={id} initial={gear} />
+          <GenderCard playerId={id} initial={gear.gender} />
           <div className="text-right">
             <div className="font-display text-[64px] leading-none tracking-tightest">
               {player.rating.toFixed(1)}

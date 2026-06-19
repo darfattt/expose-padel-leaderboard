@@ -1,6 +1,7 @@
 import type { ParticipantRow } from "./h2h-matrix";
+import { avatarFor } from "./reclub-avatar";
 import { createReadClient } from "./supabase/server";
-import type { PlayerGear, PlayerPosition } from "./types";
+import type { Gender, PlayerGear, PlayerPosition } from "./types";
 
 export interface PlayerRow {
   id: string;
@@ -79,6 +80,7 @@ export async function getPlayer(id: string): Promise<PlayerRow | null> {
 export async function getPlayerGear(id: string): Promise<PlayerGear> {
   const empty: PlayerGear = {
     position: null,
+    gender: null,
     racketSlug: null,
     racketName: null,
     racketBrand: null,
@@ -88,12 +90,13 @@ export async function getPlayerGear(id: string): Promise<PlayerGear> {
     const supabase = createReadClient();
     const { data, error } = await supabase
       .from("players")
-      .select("position, racket_slug, racket_name, racket_brand, racket_image")
+      .select("position, gender, racket_slug, racket_name, racket_brand, racket_image")
       .eq("id", id)
       .single();
     if (error) throw error;
     return {
       position: (data.position as PlayerPosition | null) ?? null,
+      gender: (data.gender as Gender | null) ?? null,
       racketSlug: (data.racket_slug as string | null) ?? null,
       racketName: (data.racket_name as string | null) ?? null,
       racketBrand: (data.racket_brand as string | null) ?? null,
@@ -152,6 +155,22 @@ export async function getPlayerReclubProfiles(): Promise<Map<string, PlayerReclu
   } catch {
     return byPlayer;
   }
+}
+
+// Resolve a Reclub avatar URL for each of the given player ids (stored value, or
+// read live off the profile page — cached daily; see lib/reclub-avatar.ts).
+// Players without a link map to null so the UI falls back to initials. Returns a
+// plain object (not a Map) so it's serializable across the Server Action boundary
+// used by the leaderboard's infinite scroll.
+export async function resolveAvatars(playerIds: string[]): Promise<Record<string, string | null>> {
+  const profiles = await getPlayerReclubProfiles();
+  const entries = await Promise.all(
+    playerIds.map(async (id) => {
+      const prof = profiles.get(id);
+      return [id, prof ? await avatarFor(prof.url, prof.avatarUrl) : null] as const;
+    })
+  );
+  return Object.fromEntries(entries);
 }
 
 // The racket each player has set on their profile, keyed by player id. Players

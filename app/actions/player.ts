@@ -4,7 +4,7 @@ import { revalidatePath, unstable_cache } from "next/cache";
 import type { Attributes } from "@/lib/archetype";
 import { racketCriteria, type RacketCriteria, type RacketRecommendation } from "@/lib/racket-reco";
 import { createServiceClient } from "@/lib/supabase/server";
-import type { PlayerPosition, RacketOption } from "@/lib/types";
+import type { Gender, PlayerPosition, RacketOption } from "@/lib/types";
 
 const PADELFUL_BASE = "https://www.padelful.com";
 
@@ -191,6 +191,30 @@ export async function updatePlayerRacket(
       racket_brand: racket?.brand ?? null,
       racket_image: racket?.image ?? null,
     })
+    .eq("id", playerId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/players/${playerId}`);
+  return { ok: true };
+}
+
+// Persist (or clear) a player's gender. Drives which FIP ranking the "plays
+// like" pro comparison is drawn from (see lib/pros.ts); no effect on ratings.
+export async function updatePlayerGender(
+  playerId: string,
+  gender: Gender | null
+): Promise<UpdateResult> {
+  if (gender !== null && !["male", "female"].includes(gender)) {
+    return { ok: false, error: "Invalid gender." };
+  }
+  let supabase;
+  try {
+    supabase = createServiceClient();
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  const { error } = await supabase
+    .from("players")
+    .update({ gender })
     .eq("id", playerId);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/players/${playerId}`);

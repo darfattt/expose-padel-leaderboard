@@ -35,6 +35,10 @@ export interface Club {
 // On-court playing position.
 export type PlayerPosition = "Right" | "Left" | "Both";
 
+// Player gender — drives which FIP ranking (men's vs women's top-90) the
+// "plays like" pro comparison is drawn from. No effect on ratings.
+export type Gender = "male" | "female";
+
 // A racket from the Padelful catalogue (https://docs.padelful.com/api/rackets),
 // trimmed to the fields we display and persist.
 export interface RacketOption {
@@ -49,6 +53,7 @@ export interface RacketOption {
 // A player's editable gear/profile, as stored on the players row.
 export interface PlayerGear {
   position: PlayerPosition | null;
+  gender: Gender | null;
   racketSlug: string | null;
   racketName: string | null;
   racketBrand: string | null;

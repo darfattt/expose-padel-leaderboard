@@ -12,7 +12,7 @@ import { bestVenue, relationshipSummary } from "./relationships";
 import type { PlayerGear } from "./types";
 
 // Bump when the prompt/schema changes so cached reports regenerate.
-const PROMPT_VERSION = "v11-context-gear-long";
+const PROMPT_VERSION = "v12-context-gear-gender";
 
 export const proComparisonSchema = z.object({
   name: z.string().describe("Full name of a real professional padel player."),
@@ -72,7 +72,7 @@ export function buildReportFacts(input: ReportInput): string {
     )
     .join("\n");
 
-  const candidates = proCandidates(player.rating, player.archetype.primary);
+  const candidates = proCandidates(player.rating, player.archetype.primary, gear?.gender);
   const level = levelForRating(player.rating);
 
   // Reliability framing: this league only trusts a high level once it's earned on
@@ -160,7 +160,7 @@ export function buildReportFacts(input: ReportInput): string {
     `Partnerships, rivalries & form:`,
     relationshipSummary(matches),
     ``,
-    `Pro comparison candidates — FIP men's world ranks #${candidates.rankLow}-#${candidates.rankHigh}, the tier this player's ${player.rating.toFixed(1)}/7 rating maps onto (${candidates.note}). Pick 1-3 of EXACTLY these, no one else:`,
+    `Pro comparison candidates — FIP ${candidates.tour} world ranks #${candidates.rankLow}-#${candidates.rankHigh}, the tier this player's ${player.rating.toFixed(1)}/7 rating maps onto (${candidates.note}). Pick 1-3 of EXACTLY these, no one else:`,
     candidates.pros.map((p) => `- ${p}`).join("\n"),
     ``,
     `Match log (most recent first):`,

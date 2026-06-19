@@ -1,11 +1,9 @@
 import Link from "next/link";
-import PlayerAvatar from "@/app/components/PlayerAvatar";
-import { getLeaderboardView } from "@/lib/leaderboard";
+import LeaderboardBoard, { ProvisionalBoard } from "@/app/components/LeaderboardBoard";
+import { getLeaderboardView, LEADERBOARD_PAGE_SIZE } from "@/lib/leaderboard";
 import { getClubs } from "@/lib/clubs";
-import { levelForRating } from "@/lib/levels";
-import { getPlayerReclubProfiles } from "@/lib/queries";
-import { avatarFor } from "@/lib/reclub-avatar";
-import { formatMonth, type RankedPlayerWithChange } from "@/lib/standings";
+import { resolveAvatars } from "@/lib/queries";
+import { formatMonth } from "@/lib/standings";
 
 export const dynamic = "force-dynamic";
 
@@ -21,16 +19,16 @@ export default async function LeaderboardPage({
   const ranked = board.filter((p) => !p.provisional);
   const provisional = board.filter((p) => p.provisional);
 
-  // Resolve a Reclub avatar per player (stored value, or read live off the
-  // profile page — cached daily). Players without a link map to null → initials.
-  const profiles = await getPlayerReclubProfiles();
-  const avatars = new Map(
-    await Promise.all(
-      board.map(async (p) => {
-        const prof = profiles.get(p.row.player_id);
-        return [p.row.player_id, prof ? await avatarFor(prof.url, prof.avatarUrl) : null] as const;
-      })
-    )
+  // Ship only the first page of ranked rows; the rest stream in on scroll via a
+  // Server Action (see LeaderboardBoard). Provisional players are a small list
+  // rendered in full.
+  const firstPage = ranked.slice(0, LEADERBOARD_PAGE_SIZE);
+
+  // Resolve a Reclub avatar per visible player (stored value, or read live off
+  // the profile page — cached daily). Players without a link map to null →
+  // initials. Avatars for later pages are resolved by the load-more action.
+  const avatars = await resolveAvatars(
+    [...firstPage, ...provisional].map((p) => p.row.player_id)
   );
 
   // Carry the active club through period links (and vice-versa).
@@ -83,134 +81,23 @@ export default async function LeaderboardPage({
         <EmptyState monthly={period !== "all"} />
       ) : (
         <>
-          <Board rows={ranked} avatars={avatars} />
+          <LeaderboardBoard
+            initialRows={firstPage}
+            initialAvatars={avatars}
+            clubId={activeClub?.id}
+            period={period}
+            initialOffset={firstPage.length}
+            initialHasMore={firstPage.length < ranked.length}
+          />
           {provisional.length > 0 && (
             <section className="mt-12">
               <p className="mono-label mb-3">Provisional · fewer than 3 games</p>
-              <Board rows={provisional} avatars={avatars} provisional />
+              <ProvisionalBoard rows={provisional} avatars={avatars} />
             </section>
           )}
         </>
       )}
     </div>
-  );
-}
-
-function Board({
-  rows,
-  avatars,
-  provisional = false,
-}: {
-  rows: RankedPlayerWithChange[];
-  avatars: Map<string, string | null>;
-  provisional?: boolean;
-}) {
-  const cols =
-    "grid-cols-[3rem_2.5rem_1fr_4rem_10rem_8rem_4.5rem_3.5rem_4rem_4.5rem]";
-  return (
-    <div className="border-t border-hairline">
-      {/* header row */}
-      <div className={`hidden sm:grid ${cols} gap-4 py-3 mono-label border-b border-hairline`}>
-        <span>#</span>
-        <span></span>
-        <span>Player</span>
-        <span className="text-right">Rating</span>
-        <span>Level</span>
-        <span>Archetype</span>
-        <span className="text-right">W–L</span>
-        <span className="text-right">GP</span>
-        <span className="text-right">Win %</span>
-        <span className="text-right">Pts</span>
-      </div>
-      {rows.map((p) => {
-        const level = levelForRating(p.rating);
-        return (
-          <Link
-            key={p.row.player_id}
-            href={`/players/${p.row.player_id}`}
-            className={`grid ${cols} gap-4 items-center py-4 border-b border-hairline hover:bg-soft-stone/40 transition-colors`}
-          >
-            <span className="font-display text-xl tabular-nums text-slate">
-              {provisional ? "—" : p.rank}
-            </span>
-            <span>
-              <RankChange delta={p.rankDelta} isNew={p.isNew} />
-            </span>
-            <span className="flex items-center gap-2.5 min-w-0">
-              <PlayerAvatar name={p.row.name} avatarUrl={avatars.get(p.row.player_id) ?? null} size={32} />
-              <span className="font-display text-lg tracking-tight truncate">{p.row.name}</span>
-            </span>
-            <span className="text-right font-mono text-lg tabular-nums">
-              {p.rating.toFixed(1)}
-              <RustMark penalty={p.ratingPenalty} days={p.daysInactive} />
-            </span>
-            <span>
-              <LevelBadge level={level} />
-            </span>
-            <span>
-              <span className="archetype-chip">{p.archetype.label}</span>
-            </span>
-            <span className="text-right tabular-nums text-body-muted">
-              {p.row.wins}–{p.row.losses}
-              {p.row.draws ? `–${p.row.draws}` : ""}
-            </span>
-            <span className="text-right tabular-nums text-body-muted">{p.row.games}</span>
-            <span className="text-right tabular-nums text-body-muted">
-              {Math.round(p.metrics.winRate * 100)}%
-            </span>
-            <span className="text-right tabular-nums text-body-muted">{p.row.points_for}</span>
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-// Up/down movement since the standings before the most recent event.
-function RankChange({ delta, isNew }: { delta: number | null; isNew: boolean }) {
-  if (isNew) {
-    return (
-      <span
-        className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-mono tracking-mono-label"
-        style={{ color: "#1863dc", backgroundColor: "#1863dc12" }}
-        title="New to the ranked board"
-      >
-        NEW
-      </span>
-    );
-  }
-  if (delta === null) return null;
-  if (delta === 0) {
-    return (
-      <span className="font-mono text-xs text-muted" title="No change" aria-label="No change">
-        –
-      </span>
-    );
-  }
-  const up = delta > 0;
-  const color = up ? "#1f8a4c" : "#d23f3f";
-  return (
-    <span
-      className="inline-flex items-center gap-0.5 font-mono text-xs tabular-nums"
-      style={{ color }}
-      title={up ? `Up ${delta}` : `Down ${Math.abs(delta)}`}
-      aria-label={up ? `Up ${delta}` : `Down ${Math.abs(delta)}`}
-    >
-      <span aria-hidden>{up ? "▲" : "▼"}</span>
-      {Math.abs(delta)}
-    </span>
-  );
-}
-
-// A small "rust" marker shown when a player's rating has been docked for
-// inactivity (see lib/decay.ts). Hidden for fresh players.
-function RustMark({ penalty, days }: { penalty: number; days: number | null }) {
-  if (!penalty) return null;
-  const title = `Rusty: −${penalty.toFixed(1)} for ${days ?? "?"} days off the court`;
-  return (
-    <span className="ml-1 align-middle text-xs text-coral" title={title} aria-label={title}>
-      💤
-    </span>
   );
 }
 
@@ -226,19 +113,6 @@ function ClubTab({ href, label, active }: { href: string; label: string; active:
     >
       {label}
     </Link>
-  );
-}
-
-function LevelBadge({ level }: { level: ReturnType<typeof levelForRating> }) {
-  return (
-    <span
-      className="level-chip"
-      style={{ color: level.color, borderColor: `${level.color}55`, backgroundColor: `${level.color}12` }}
-      title={`${level.category} — ${level.description}`}
-    >
-      <span aria-hidden>{level.badge}</span>
-      {level.category}
-    </span>
   );
 }
 

@@ -220,6 +220,41 @@ export interface LeaderboardView {
   period: string; // resolved period: "all" or a yyyy-mm month
 }
 
+// How many ranked rows the leaderboard ships per page (initial render + each
+// infinite-scroll fetch). See getLeaderboardPage.
+export const LEADERBOARD_PAGE_SIZE = 30;
+
+export interface LeaderboardPage {
+  rows: RankedPlayerWithChange[]; // this slice of the ranked board
+  total: number; // total ranked (non-provisional) players in the field
+  nextOffset: number; // offset to pass back for the next page
+  hasMore: boolean; // whether more ranked rows remain after this slice
+}
+
+// One page of the *ranked* board for infinite scroll. Ratings are field-relative
+// (computed against the whole field), so the full board is always computed here
+// and only the returned slice is paginated — this never changes anyone's rating
+// or rank, it just limits how many rows are shipped at a time. Provisional
+// players are excluded; they're a small, separate list rendered in full.
+export async function getLeaderboardPage(
+  clubId?: string,
+  period?: string,
+  offset = 0,
+  limit = LEADERBOARD_PAGE_SIZE
+): Promise<LeaderboardPage> {
+  const { board } = await getLeaderboardView(clubId, period);
+  const ranked = board.filter((p) => !p.provisional);
+  const start = Math.max(0, offset);
+  const rows = ranked.slice(start, start + limit);
+  const nextOffset = start + rows.length;
+  return {
+    rows,
+    total: ranked.length,
+    nextOffset,
+    hasMore: nextOffset < ranked.length,
+  };
+}
+
 // The leaderboard for a club + time period, with rank-change arrows.
 //   period "all" (default): the full field, each row diffed against the
 //     standings *before the most recent event* (the up/down indicator).
