@@ -25,7 +25,32 @@ export type FxKind =
   | "tornado"
   | "allcourt"
   | "closer"
+  | "volley"
+  | "backhand"
+  | "forehand"
+  | "return"
   | "smart";
+
+// Every value FxKind can take — used to validate the `fx` token a Skill carries
+// (lib/sim/skills.ts) before trusting it as a kind.
+const FX_KINDS: readonly FxKind[] = [
+  "cannon",
+  "fireserve",
+  "netbreak",
+  "ice",
+  "vibora",
+  "wall",
+  "greatwall",
+  "lob",
+  "tornado",
+  "allcourt",
+  "closer",
+  "volley",
+  "backhand",
+  "forehand",
+  "return",
+  "smart",
+];
 
 // The centre net's x in canvas pixels (cx(0.5)) and the playing area's vertical
 // span (cy(0)..cy(1)); duplicated here so the net-break and Great Wall can sit on
@@ -43,9 +68,13 @@ export interface FxGeom {
   vy: number;
 }
 
-// Map a skill's display name (from lib/sim/skills.ts) to its effect. Falls back
-// to the understated "smart play" spark for anything unrecognised.
-export function fxKindForSkill(name: string): FxKind {
+// Resolve a skill's effect. Prefers the explicit `fx` token a Skill carries (so a
+// personalised name like "Vertex Smash" still finds its animation), then matches
+// known display names, then a keyword in the name (the personalised suffixes —
+// Smash / Block / Return / Volley …), and finally falls back to the understated
+// "smart play" spark for anything unrecognised.
+export function fxKindForSkill(name: string, token?: string | null): FxKind {
+  if (token && (FX_KINDS as readonly string[]).includes(token)) return token as FxKind;
   switch (name) {
     case "Cannon Smash":
       return "cannon";
@@ -67,9 +96,21 @@ export function fxKindForSkill(name: string): FxKind {
       return "allcourt";
     case "Closer Instinct":
       return "closer";
-    default:
-      return "smart";
   }
+  // Keyword fallback for personalised / kudos names ("Vertex Smash", "Net Storm").
+  const n = name.toLowerCase();
+  if (n.includes("smash")) return "cannon";
+  if (n.includes("block") || n.includes("wall") || n.includes("defen")) return "greatwall";
+  if (n.includes("volley") || n.includes("storm")) return "volley";
+  if (n.includes("backhand") || n.includes("whip")) return "backhand";
+  if (n.includes("forehand") || n.includes("drive")) return "forehand";
+  if (n.includes("return") || n.includes("counter")) return "return";
+  if (n.includes("lob") || n.includes("tornado")) return "tornado";
+  if (n.includes("serve") || n.includes("fire")) return "fireserve";
+  if (n.includes("víbora") || n.includes("vibora")) return "vibora";
+  if (n.includes("bandeja") || n.includes("ice")) return "ice";
+  if (n.includes("dash") || n.includes("blur")) return "allcourt";
+  return "smart";
 }
 
 // How hard a skill hits: knockdown drives the victim's topple (0 = upright,
@@ -101,6 +142,18 @@ export function fxDynamics(kind: FxKind, p: number): { knockdown: number; shake:
       return { knockdown: 0, shake: Math.max(0, 1.4 * Math.sin(Math.PI * p)) };
     case "allcourt":
       return { knockdown: 0.35 * afterHit(0.5, 0.22), shake: 0 };
+    case "forehand":
+      // A flat power drive — the heaviest non-overhead hit, snaps them back hard.
+      return { knockdown: 0.9 * afterHit(0.4, 0.12), shake: fade(0.4, 0.4, 3) };
+    case "return":
+      // The counter lands late but lands clean.
+      return { knockdown: 0.7 * afterHit(0.55, 0.14), shake: fade(0.55, 0.35, 2.2) };
+    case "backhand":
+      // A whipped cross stings rather than flattens.
+      return { knockdown: 0.5 * afterHit(0.42, 0.16), shake: fade(0.42, 0.3, 1.6) };
+    case "volley":
+      // Quick hands at the net — a sharp jolt, not a topple.
+      return { knockdown: 0.4 * afterHit(0.5, 0.18), shake: fade(0.5, 0.25, 1.4) };
     default:
       return { knockdown: 0, shake: 0 }; // wall, greatwall, lob, smart — feet stay planted
   }
@@ -133,6 +186,14 @@ export function fxImpactFraction(kind: FxKind): number {
       return 0.5;
     case "lob":
       return 0.5;
+    case "forehand":
+      return 0.4;
+    case "backhand":
+      return 0.42;
+    case "volley":
+      return 0.5;
+    case "return":
+      return 0.55;
     default:
       return 0.12; // smart play — the spark is early and lingering
   }
@@ -202,6 +263,44 @@ export function drawConfetti(
   ctx.globalAlpha = 1;
 }
 
+// The flip side of the confetti: a sombre, grey rain for when *your* side loses.
+// Slanted streaks fall fast across the court band [x0,x1] × [yTop,yBottom] — same
+// deterministic, looping descent as the confetti so it doesn't flicker — and a few
+// of them puddle-splash near the floor. Pair with a dim overlay drawn by the
+// caller. `t` is the free-running celebration clock in ms.
+const RAIN = ["rgba(150,170,190,0.55)", "rgba(120,140,165,0.5)", "rgba(180,195,210,0.45)"];
+
+export function drawDefeat(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  x0: number,
+  x1: number,
+  yTop: number,
+  yBottom: number,
+  count = 70
+) {
+  const span = x1 - x0;
+  const fall = yBottom - yTop + 40;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < count; i++) {
+    const base = x0 + rand(i, 1) * span;
+    const speed = 0.16 + rand(i, 2) * 0.16; // rain falls faster than confetti
+    const y = yTop - 20 + ((t * speed + rand(i, 3) * fall) % fall);
+    const len = 4 + rand(i, 4) * 5;
+    ctx.strokeStyle = RAIN[i % RAIN.length];
+    ctx.beginPath();
+    ctx.moveTo(Math.round(base), Math.round(y));
+    ctx.lineTo(Math.round(base) - 2, Math.round(y + len)); // slight diagonal slant
+    ctx.stroke();
+    // a low splash tick where a streak meets the floor
+    if (y + len >= yBottom - 2 && y + len <= yBottom + 4) {
+      ctx.fillStyle = RAIN[(i + 1) % RAIN.length];
+      ctx.fillRect(Math.round(base) - 2, Math.round(yBottom) - 1, 4, 1);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
 // --- per-skill effects ------------------------------------------------------
 
 export function drawSkillFx(
@@ -235,6 +334,14 @@ export function drawSkillFx(
       return drawAllcourt(ctx, p, g, color, seed);
     case "closer":
       return drawCloser(ctx, p, g);
+    case "volley":
+      return drawVolley(ctx, p, g, color, seed);
+    case "backhand":
+      return drawBackhand(ctx, p, g, color, seed);
+    case "forehand":
+      return drawForehand(ctx, p, g, color, seed);
+    case "return":
+      return drawReturn(ctx, p, g, color, seed);
     case "smart":
       return drawSmart(ctx, p, g, color);
   }
@@ -832,4 +939,289 @@ function drawTornado(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: 
     ctx.fillRect(Math.round(g.vx + Math.cos(a) * (6 + i)) - 1, Math.round(baseY + 2), 2, 1);
   }
   ctx.globalAlpha = 1;
+}
+
+// Net Storm (volley) — a flurry of reflex volleys at the tape: the ball blurs
+// back and forth a few times between the two front players, then one sharp
+// putaway flashes into the victim. Quick, twitchy, close-range.
+function drawVolley(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  const hit = 0.5;
+  if (p < hit) {
+    const t = p / hit;
+    const exchanges = 4; // back-and-forth volleys before the putaway
+    const phase = t * exchanges;
+    const leg = Math.floor(phase);
+    const u = phase - leg;
+    // alternate ends each volley; ride a shallow arc between them
+    const fromAtt = leg % 2 === 0;
+    const x0 = fromAtt ? g.ax : g.vx;
+    const y0 = fromAtt ? g.ay : g.vy;
+    const x1 = fromAtt ? g.vx : g.ax;
+    const y1 = fromAtt ? g.vy : g.ay;
+    const bx = lerp(x0, x1, u);
+    const by = lerp(y0, y1, u) - 6 * Math.sin(Math.PI * u);
+    // motion-blur ghosts trailing the ball
+    for (let i = 3; i >= 1; i--) {
+      const uu = clamp(u - i * 0.12, 0, 1);
+      ctx.globalAlpha = 0.18 * (1 - i / 4);
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.round(lerp(x0, x1, uu)) - 1, Math.round(lerp(y0, y1, uu)) - 1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#e8f94a";
+    circle(ctx, bx, by, 2);
+    // little contact flick at whichever racket just hit
+    if (u < 0.2) {
+      ctx.globalAlpha = 1 - u / 0.2;
+      ctx.fillStyle = "#ffffff";
+      star(ctx, x0, y0, 5, 2);
+      ctx.globalAlpha = 1;
+    }
+  } else {
+    const e = (p - hit) / (1 - hit);
+    // the putaway lands: a crisp burst + a couple of speed jabs
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.fillStyle = "#fff2c2";
+    star(ctx, g.vx, g.vy, 5 + e * 8, 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      const a = i * ((Math.PI * 2) / 5) + seed;
+      ctx.beginPath();
+      ctx.moveTo(g.vx + Math.cos(a) * 3, g.vy + Math.sin(a) * 3);
+      ctx.lineTo(g.vx + Math.cos(a) * (6 + e * 12), g.vy + Math.sin(a) * (6 + e * 12));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Backhand Whip — a whipped backhand cross: a curved crescent blade sweeps from
+// the striker to the victim, bowing out to one side, then snaps into a little
+// curl of sidespin on contact.
+function drawBackhand(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  const hit = 0.42;
+  const t = clamp(p / hit, 0, 1);
+  // perpendicular bow direction so the slash arcs across, not straight.
+  const ang = Math.atan2(g.vy - g.ay, g.vx - g.ax);
+  const perp = ang + Math.PI / 2;
+  const bow = 16; // how far the crescent bellies out
+  // the swept blade: a tapering curved stroke that draws on as it travels.
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  const steps = 16;
+  let started = false;
+  for (let i = 0; i <= steps; i++) {
+    const u = (i / steps) * t;
+    const bx = lerp(g.ax, g.vx, u) + Math.cos(perp) * bow * Math.sin(Math.PI * u);
+    const by = lerp(g.ay, g.vy, u) + Math.sin(perp) * bow * Math.sin(Math.PI * u);
+    if (started) ctx.lineTo(bx, by);
+    else {
+      ctx.moveTo(bx, by);
+      started = true;
+    }
+  }
+  ctx.stroke();
+  // a brighter leading crescent at the blade's tip
+  const tx = lerp(g.ax, g.vx, t) + Math.cos(perp) * bow * Math.sin(Math.PI * t);
+  const ty = lerp(g.ay, g.vy, t) + Math.sin(perp) * bow * Math.sin(Math.PI * t);
+  ctx.fillStyle = "#eafff7";
+  circle(ctx, tx, ty, 2.4);
+  // sidespin curl + sting on contact
+  if (p >= hit) {
+    const e = (p - hit) / (1 - hit);
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i <= 10; i++) {
+      const a = -e * Math.PI * 1.6 + (i / 10) * Math.PI * 1.6;
+      const r = 3 + e * 9;
+      const x = g.vx + Math.cos(a) * r;
+      const y = g.vy + Math.sin(a) * r;
+      if (i) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#d6f7ec";
+    for (let i = 0; i < 4; i++) {
+      const a = i * 1.6 + seed;
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(a) * e * 11) - 1,
+        Math.round(g.vy + Math.sin(a) * e * 11) - 1,
+        2,
+        2
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Forehand Drive — a flat, heavy power drive: a thick tracer bolts dead-straight
+// from striker to victim with chevron speed marks chasing it, then a flat
+// horizontal shockwave pops on impact.
+function drawForehand(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  const hit = 0.4;
+  const ang = Math.atan2(g.vy - g.ay, g.vx - g.ax);
+  if (p < hit) {
+    const t = p / hit;
+    const bx = lerp(g.ax, g.vx, t);
+    const by = lerp(g.ay, g.vy, t);
+    // thick straight tracer from the racket up to the ball
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(g.ax, g.ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    // chevron speed marks chasing the ball
+    ctx.strokeStyle = "#eafff7";
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const uu = clamp(t - i * 0.1, 0, 1);
+      const cxp = lerp(g.ax, g.vx, uu);
+      const cyp = lerp(g.ay, g.vy, uu);
+      const back = ang + Math.PI;
+      const wing = 2.6;
+      ctx.globalAlpha = 0.8 * (1 - i / 4);
+      ctx.beginPath();
+      ctx.moveTo(cxp + Math.cos(back + 0.5) * 4 * wing, cyp + Math.sin(back + 0.5) * 4 * wing);
+      ctx.lineTo(cxp, cyp);
+      ctx.lineTo(cxp + Math.cos(back - 0.5) * 4 * wing, cyp + Math.sin(back - 0.5) * 4 * wing);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // the driven ball
+    ctx.fillStyle = "#e8f94a";
+    circle(ctx, bx, by, 2.6);
+  } else {
+    const e = (p - hit) / (1 - hit);
+    // flat horizontal shockwave — a wide, thin ellipse blowing outward
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(g.vx, g.vy, 6 + e * 22, 3 + e * 6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // a hard white flash core
+    if (e < 0.4) {
+      ctx.globalAlpha = 1 - e / 0.4;
+      ctx.fillStyle = "#ffffff";
+      circle(ctx, g.vx, g.vy, 2 + 5 * (1 - e / 0.4));
+    }
+    // debris sprayed along the line of fire
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    for (let i = 0; i < 7; i++) {
+      const d = e * (8 + 18 * rand(seed, i));
+      ctx.fillStyle = i % 2 ? "#fff2c2" : color;
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(ang) * d) - 1,
+        Math.round(g.vy + Math.sin(ang) * d + (rand(seed, i + 5) - 0.5) * 8) - 1,
+        2,
+        2
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Counter Return — reads the incoming shot and rifles it back: the ball arrives
+// from the victim's side to the striker, a parry flashes, then a bright bolt
+// rockets back the other way with a redirect chevron and bursts on the victim.
+function drawReturn(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  const turn = 0.4; // when the read flips into the counter
+  const ang = Math.atan2(g.vy - g.ay, g.vx - g.ax);
+  if (p < turn) {
+    const t = p / turn;
+    // incoming ball: victim → striker, dotted, decelerating into the read
+    const bx = lerp(g.vx, g.ax, t);
+    const by = lerp(g.vy, g.ay, t);
+    ctx.fillStyle = "#9aa3ad";
+    for (let i = 0; i < 4; i++) {
+      const uu = clamp(t - i * 0.12, 0, 1);
+      ctx.globalAlpha = 0.6 * (1 - i / 4);
+      ctx.fillRect(Math.round(lerp(g.vx, g.ax, uu)) - 1, Math.round(lerp(g.vy, g.ay, uu)) - 1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#e8f94a";
+    circle(ctx, bx, by, 2.2);
+    // a parry flash building at the striker as the read locks in
+    if (t > 0.6) {
+      ctx.globalAlpha = (t - 0.6) / 0.4;
+      ctx.fillStyle = "#ffffff";
+      star(ctx, g.ax, g.ay, 6, 2);
+      ctx.globalAlpha = 1;
+    }
+  } else {
+    const e = (p - turn) / (1 - turn);
+    const hitU = 0.7; // fraction of the counter at which it lands
+    if (e < hitU) {
+      const t = e / hitU;
+      const bx = lerp(g.ax, g.vx, t);
+      const by = lerp(g.ay, g.vy, t);
+      // the counter bolt: a bright streak striker → victim
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(g.ax, g.ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      // redirect chevron pointing the new way
+      const fwd = ang;
+      ctx.strokeStyle = "#eafff7";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(bx + Math.cos(fwd + 2.5) * 5, by + Math.sin(fwd + 2.5) * 5);
+      ctx.lineTo(bx, by);
+      ctx.lineTo(bx + Math.cos(fwd - 2.5) * 5, by + Math.sin(fwd - 2.5) * 5);
+      ctx.stroke();
+      ctx.fillStyle = "#e8f94a";
+      circle(ctx, bx, by, 2.4);
+    } else {
+      const f = (e - hitU) / (1 - hitU);
+      // burst on the victim
+      ctx.globalAlpha = Math.max(0, 1 - f);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(g.vx, g.vy, 4 + f * 14, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let i = 0; i < 6; i++) {
+        const a = i * ((Math.PI * 2) / 6) + seed;
+        ctx.fillStyle = i % 2 ? "#fff2c2" : color;
+        ctx.fillRect(
+          Math.round(g.vx + Math.cos(a) * f * 14) - 1,
+          Math.round(g.vy + Math.sin(a) * f * 14) - 1,
+          2,
+          2
+        );
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
 }

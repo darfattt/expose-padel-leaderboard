@@ -7,6 +7,7 @@ import type { TeamSpec } from "@/lib/sim/team";
 import { drawAvatar, type AvatarPose } from "./avatar-sprite";
 import {
   drawConfetti,
+  drawDefeat,
   drawSkillFx,
   fxDynamics,
   fxImpactFraction,
@@ -204,7 +205,7 @@ function buildTimeline(script: MatchScript): Timeline {
 
     if (pt.skill) {
       const land = rally[rally.length - 1]; // winning shot lands on the loser's side
-      const fx = fxKindForSkill(pt.skill.skill.name);
+      const fx = fxKindForSkill(pt.skill.skill.name, pt.skill.skill.fx);
       skills.push({
         time: t,
         team: pt.skill.team,
@@ -544,6 +545,29 @@ export default function MatchSim({
       case "lob":
         blip(700 * k, 80, "triangle", 0.1);
         blip(560 * k, 110, "triangle", 0.09, 120);
+        break;
+      case "volley":
+        // quick reflex hands — a stutter of bright square taps, then a pop.
+        blip(900 * k, 35, "square", 0.09);
+        blip(1040 * k, 35, "square", 0.09, 55);
+        blip(1180 * k, 35, "square", 0.09, 110);
+        blip(1500 * k, 70, "sine", 0.12, 170);
+        break;
+      case "backhand":
+        // a whip-crack: a fast downward sweep then a stinging snap.
+        sweep(1500 * k, 520 * k, 100, "sawtooth", 0.13);
+        blip(1700 * k, 35, "square", 0.08, 95);
+        break;
+      case "forehand":
+        // a flat power drive — a low punchy sweep into a hard thud.
+        sweep(520 * k, 180 * k, 110, "sawtooth", 0.16);
+        blip(150 * k, 130, "square", 0.18, 90);
+        break;
+      case "return":
+        // an incoming dip, then a bright counter rising back with a snap.
+        blip(360 * k, 80, "sine", 0.1);
+        sweep(420 * k, 1100 * k, 150, "sawtooth", 0.14, 110);
+        blip(1500 * k, 45, "square", 0.08, 250);
         break;
       default: {
         // smart play / unrecognised — the original three-step arpeggio
@@ -1065,9 +1089,16 @@ function drawScene(
 
   ctx.restore();
 
-  // Confetti rains over the held final frame while the winners celebrate.
+  // Post-match overlay, from your side's perspective (team A). Win → confetti
+  // celebration; loss → a dim court with a sombre grey rain over the held frame.
   if (celebrate > 0) {
-    drawConfetti(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
+    if (script.winner === "A") {
+      drawConfetti(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
+    } else {
+      ctx.fillStyle = "rgba(8,12,18,0.32)";
+      ctx.fillRect(0, 0, W, H);
+      drawDefeat(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
+    }
   }
 
   // Scoreboard.
@@ -1106,16 +1137,18 @@ function drawScene(
     ctx.fillText("Press play to simulate the match", W / 2, H / 2 + 4);
   }
 
-  // Winner banner once finished.
+  // Outcome banner once finished — framed from your side (team A): you win, or
+  // your pair lose, always naming team A and reading the score from their side.
   if (clock >= timeline.total) {
+    const youWon = script.winner === "A";
+    const you = script.teamA;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     ctx.fillRect(0, H / 2 - 22, W, 44);
     ctx.textAlign = "center";
     ctx.font = "bold 16px ui-monospace, monospace";
-    const win = script.winner === "A" ? script.teamA : script.teamB;
-    ctx.fillStyle = script.winner === "A" ? "#7fe6cf" : "#ff9d85";
+    ctx.fillStyle = youWon ? "#7fe6cf" : "#ff9d85";
     ctx.fillText(
-      `${win.playerName} & ${win.proName} win ${script.finalScore.a}–${script.finalScore.b}`,
+      `${you.playerName} & ${you.proName} ${youWon ? "win" : "lose"} ${script.finalScore.a}–${script.finalScore.b}`,
       W / 2,
       H / 2 + 5
     );

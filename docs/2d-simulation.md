@@ -145,6 +145,86 @@ Each of the 4 characters surfaces 1–2 named moves, shown as labels that flash 
 When a player has **no racket** set, only the pro signature shows. Skills are cosmetic-but-grounded:
 each maps to a small, documented modifier in `skills.ts` so "results follow the gear/pro".
 
+## Skills v2 — personalised gear moves + Reclub-kudos signatures
+
+The original `skills.ts` surfaced two moves per character (a fixed racket-style
+name + the pro signature). v2 makes a character's moves feel *theirs* and adds a
+third, kudos-driven signature — so each side can now flash up to three grounded
+labels.
+
+### Personalised gear moves
+
+The racket move is now named after the player's actual frame. `gearMoniker()`
+trims a redundant brand and keeps the model ("Bullpadel Vertex 04 Air" → "Vertex
+04"), and the play-style picks the verb:
+
+| Play-style | Suffix | Example | Animation (`fx`) |
+|---|---|---|---|
+| power | `Smash` | `Vertex 04 Smash` | `cannon` |
+| control | `Block` | `Vertex 04 Block` | `greatwall` |
+| balanced | `Return` | `Vertex 04 Return` | `return` (new) |
+
+When no racket is set the move drops entirely (unchanged); a bare moniker degrades
+to the legacy fixed name (`Fire Serve` / `Great Wall` / `All-Court`).
+
+### Reclub-kudos signatures
+
+Reclub endorses players with **kudos** in named skill categories. We have no live
+kudos feed, so `signatureKudos()` derives the one the player's peers would most
+likely give them from the grounded profile (archetype + attributes + play-style).
+The six mandatory Reclub categories are covered, plus a few of our own:
+
+| Kudos | Move | Animation (`fx`) | New? |
+|---|---|---|---|
+| volley | Net Storm | `volley` | ✅ new |
+| backhand | Backhand Whip | `backhand` | ✅ new |
+| forehand | Forehand Drive | `forehand` | ✅ new |
+| defense | Great Wall | `greatwall` | reuse |
+| return | Counter Return | `return` | ✅ new |
+| lob | Tornado Lob | `tornado` | reuse |
+| smash *(extra)* | Cannon Smash | `cannon` | reuse |
+| bandeja *(extra)* | Ice Bandeja | `ice` | reuse |
+| vibora *(extra)* | Víbora | `vibora` | reuse |
+| serve *(extra)* | Fire Serve | `fireserve` | reuse |
+| speed *(extra)* | Blur Dash | `allcourt` | reuse |
+
+Each `Skill` now carries an `fx` **token** (a plain string) so `lib/` stays
+decoupled from the canvas layer; `skill-fx.ts#fxKindForSkill(name, token)` resolves
+it (token → known name → keyword in the name → `smart` fallback), which is what lets
+a personalised name like "Vertex Smash" still find the cannon effect.
+
+The engine (`engine.ts`) flashes the pro signature on big points and otherwise
+rotates between the player's *own* moves (racket + kudos) on attacking points, so
+both surface across a match. Everything stays deterministic per seed.
+
+### New effect animations (research → render)
+
+Four new pixel effects were added to `skill-fx.ts`, each grounded in how the real
+shot looks and feels on court. All are deterministic (seeded particles), reset
+`globalAlpha`, and feed `fxDynamics()` (victim knockdown + screen shake) and
+`fxImpactFraction()` (when the impact sound fires).
+
+- **`volley` — Net Storm.** A real volley is reflex hands at the net. The ball
+  blurs back-and-forth between the two front players (motion-blur ghosts + contact
+  flicks) for a few quick exchanges, then one sharp star-burst putaway. Light
+  knockdown, quick shake — a jolt, not a topple.
+- **`backhand` — Backhand Whip.** A whipped backhand carries sidespin and curls.
+  A tapering crescent blade sweeps along a bowed (perpendicular-offset) path from
+  striker to victim, finishing in a small spin-curl arc + sting particles. Medium
+  knockdown.
+- **`forehand` — Forehand Drive.** A flat power drive is fast and straight. A thick
+  dead-straight tracer bolts across with chasing `>>` chevron speed marks and the
+  driven ball, then a **flat horizontal shockwave** (wide thin ellipse) + white core
+  + debris along the line of fire. Heaviest non-overhead knockdown + big shake.
+- **`return` — Counter Return.** A counter reads then redirects. Phase 1: the
+  incoming ball travels victim→striker (decelerating dotted trail) with a parry
+  flash building at the striker. Phase 2: a bright bolt rockets striker→victim with
+  a redirect chevron, bursting on contact. Lands late (impact ≈ 0.55).
+
+Each also gets its own Web-Audio voice in `MatchSim.tsx#playSkillSound`
+(volley: stutter taps + pop; backhand: whip-crack sweep; forehand: low punchy
+sweep + thud; return: incoming dip → rising counter snap).
+
 ## Procedural pro pixel avatars ("similar enough")
 
 The FIP dataset has only `rank`, `name`, `photo` — no nationality/handedness. So derive a

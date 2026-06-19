@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   drawConfetti,
+  drawDefeat,
   drawSkillFx,
   fxDynamics,
   fxImpactFraction,
@@ -50,6 +51,10 @@ const KINDS: FxKind[] = [
   "tornado",
   "allcourt",
   "closer",
+  "volley",
+  "backhand",
+  "forehand",
+  "return",
   "smart",
 ];
 
@@ -68,6 +73,29 @@ describe("skill-fx", () => {
     expect(fxKindForSkill("Closer Instinct")).toBe("closer");
     expect(fxKindForSkill("Smart Play")).toBe("smart");
     expect(fxKindForSkill("anything else")).toBe("smart");
+  });
+
+  it("maps the new kudos skills by name", () => {
+    expect(fxKindForSkill("Net Storm")).toBe("volley");
+    expect(fxKindForSkill("Backhand Whip")).toBe("backhand");
+    expect(fxKindForSkill("Forehand Drive")).toBe("forehand");
+    expect(fxKindForSkill("Counter Return")).toBe("return");
+    expect(fxKindForSkill("Blur Dash")).toBe("allcourt");
+  });
+
+  it("prefers an explicit fx token over the name", () => {
+    // A personalised name the switch can't know, carried by its skill token.
+    expect(fxKindForSkill("Vertex Smash", "cannon")).toBe("cannon");
+    expect(fxKindForSkill("Vertex Return", "return")).toBe("return");
+    expect(fxKindForSkill("Whatever", "tornado")).toBe("tornado");
+    // A bogus token is ignored and we fall back to keyword matching.
+    expect(fxKindForSkill("Vertex Smash", "nonsense")).toBe("cannon");
+  });
+
+  it("falls back to a keyword in personalised names", () => {
+    expect(fxKindForSkill("Vertex Smash")).toBe("cannon");
+    expect(fxKindForSkill("Vertex Block")).toBe("greatwall");
+    expect(fxKindForSkill("Vertex Return")).toBe("return");
   });
 
   it("gives every kind an impact fraction inside the flash window", () => {
@@ -107,6 +135,14 @@ describe("skill-fx", () => {
     for (let t = 0; t < 6000; t += 120) {
       const ctx = stubCtx();
       expect(() => drawConfetti(ctx, t, 30, 450, 50, 244)).not.toThrow();
+      expect(ctx.globalAlpha).toBe(1);
+    }
+  });
+
+  it("rains the defeat drizzle without throwing and resets alpha", () => {
+    for (let t = 0; t < 6000; t += 120) {
+      const ctx = stubCtx();
+      expect(() => drawDefeat(ctx, t, 30, 450, 50, 244)).not.toThrow();
       expect(ctx.globalAlpha).toBe(1);
     }
   });

@@ -3,7 +3,7 @@ import { proCandidates } from "../pros";
 import { racketPlayStyle, type RacketPlayStyle } from "../racket-reco";
 import { avatarFromName, type AvatarSpec } from "./avatar";
 import { type PowerInput, staminaFor } from "./power";
-import { type Skill, teamSkills } from "./skills";
+import { gearMoniker, signatureKudos, type Skill, teamSkills } from "./skills";
 
 // Effective per-axis stats for a 2v2 team: the human player blended with their
 // pro lookalike. The pro raises the floor (they're rank-appropriate to the
@@ -66,6 +66,8 @@ export interface TeamPlayer {
   attributes: Attributes;
   archetypePrimary: AttributeKey | "balanced";
   hasRacket: boolean; // whether the player has a racket set in their gear
+  racketName?: string | null; // model name, for personalised gear-skill labels
+  racketBrand?: string | null; // brand, trimmed from the moniker when redundant
   rank?: number | null; // leaderboard rank (1 = best); null/undefined = provisional
   fieldSize?: number; // size of the ranked field, to normalize rank
   experienceGames?: number; // career games played (veterancy → stamina + edge)
@@ -84,6 +86,13 @@ export function buildTeam(player: TeamPlayer, side: "A" | "B", color: string): T
   // Racket play-style is grounded in the player's own attributes; we only
   // surface the racket skill when they've actually set a racket (gear optional).
   const style: RacketPlayStyle | null = player.hasRacket ? racketPlayStyle(player.attributes) : null;
+  // A personalised label for the racket move ("Vertex Smash"), and the player's
+  // signature Reclub kudos move, both derived from the grounded profile.
+  const moniker =
+    player.hasRacket && player.racketName
+      ? gearMoniker(player.racketName, player.racketBrand)
+      : null;
+  const kudos = signatureKudos(player.attributes, player.archetypePrimary, style);
 
   return {
     side,
@@ -91,7 +100,7 @@ export function buildTeam(player: TeamPlayer, side: "A" | "B", color: string): T
     proName,
     proRank,
     stats: blendStats(player.attributes, proRank, player.experienceGames ?? 0),
-    skills: teamSkills(style, player.archetypePrimary),
+    skills: teamSkills(style, player.archetypePrimary, { gearMoniker: moniker, kudos }),
     avatars: [avatarFromName(player.name, color), avatarFromName(proName)],
     color,
   };

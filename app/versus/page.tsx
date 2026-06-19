@@ -569,6 +569,8 @@ function simPlayer(
     attributes: player.attributes,
     archetypePrimary: player.archetype.primary,
     hasRacket: Boolean(gear.racketName),
+    racketName: gear.racketName,
+    racketBrand: gear.racketBrand,
     rank: player.rank,
     fieldSize: field.rankedCount,
     experienceGames: player.row.games,

@@ -231,15 +231,17 @@ export function buildMatchScript(input: SimInput): MatchScript {
     });
 
     // Skill flash: big points lean on the pro's clutch signature; otherwise an
-    // attacking team can flash its racket/attack move. Picked from the winner's
-    // own skill list so the label is always grounded.
+    // attacking team can flash one of its *own* moves — the racket move or the
+    // player's Reclub kudos signature, rotated by the PRNG so both surface over a
+    // match. Picked from the winner's own skill list so the label is always grounded.
     const team = winner === "A" ? input.teamA : input.teamB;
     let skill: PointEvent["skill"];
     if (big && team.stats.clutch > 55 && rng() < 0.6) {
       const pro = team.skills.find((s) => s.source === "pro");
       if (pro) skill = { team: winner, skill: pro };
     } else if (team.stats.attack > 55 && rng() < 0.3) {
-      const move = team.skills.find((s) => s.source === "racket") ?? team.skills[0];
+      const own = team.skills.filter((s) => s.source !== "pro");
+      const move = own.length ? own[Math.floor(rng() * own.length)] : team.skills[0];
       if (move) skill = { team: winner, skill: move };
     }
 
