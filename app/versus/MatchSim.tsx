@@ -6,6 +6,7 @@ import { buildMatchScript, type MatchScript } from "@/lib/sim/engine";
 import type { TeamSpec } from "@/lib/sim/team";
 import { drawAvatar, type AvatarPose } from "./avatar-sprite";
 import {
+  drawChampionCelebration,
   drawConfetti,
   drawDefeat,
   drawGlassCrack,
@@ -367,6 +368,7 @@ export default function MatchSim({
   locked = false,
   lockedNotice,
   deathSide,
+  finale = false,
   onEnded,
   autoPlay = false,
   collapsibleCommentary = false,
@@ -385,6 +387,10 @@ export default function MatchSim({
   // hit" — they crumple on every contact (their team is already calibrated to a
   // shutout). Undefined for a normal, evenly-kitted match.
   deathSide?: "A" | "B";
+  // When you (team A) win this game, play the grand championship celebration —
+  // a trophy rises and a photographer runs in to snap you — instead of the plain
+  // confetti. The tournament arena sets this only on the title-clinching game.
+  finale?: boolean;
   // Fired once when the match clock reaches the end — the tournament arena uses
   // it to reveal the "advance" control after your match settles.
   onEnded?: () => void;
@@ -717,7 +723,7 @@ export default function MatchSim({
         cur.y = ny;
       }
 
-      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current, locked, deathSide);
+      drawScene(ctx, liveScript, timeline, clock, posRef.current, moving, started, celebrateRef.current, locked, deathSide, finale);
       prevClockRef.current = clock;
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -727,7 +733,7 @@ export default function MatchSim({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       lastTsRef.current = null;
     };
-  }, [liveScript, timeline, started, locked, deathSide]);
+  }, [liveScript, timeline, started, locked, deathSide, finale]);
 
   // Auto-scroll the commentary feed as new lines land.
   useEffect(() => {
@@ -1080,7 +1086,8 @@ function drawScene(
   started: boolean,
   celebrate: number,
   locked = false,
-  deathSide?: "A" | "B"
+  deathSide?: "A" | "B",
+  finale = false
 ) {
   const a = script.teamA;
   const b = script.teamB;
@@ -1225,7 +1232,10 @@ function drawScene(
   // celebration; loss → a dim court with a sombre grey rain over the held frame.
   if (celebrate > 0) {
     if (script.winner === "A") {
-      drawConfetti(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
+      // Lifting the title gets the grand version (trophy + photographer); every
+      // other win gets the plain confetti.
+      if (finale) drawChampionCelebration(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
+      else drawConfetti(ctx, celebrate, cx(0), cx(1), cy(0), cy(1));
     } else {
       ctx.fillStyle = "rgba(8,12,18,0.32)";
       ctx.fillRect(0, 0, W, H);
@@ -1284,8 +1294,9 @@ function drawScene(
     ctx.textAlign = "center";
     ctx.font = "bold 16px ui-monospace, monospace";
     ctx.fillStyle = youWon ? "#7fe6cf" : "#ff9d85";
+    const verb = finale && youWon ? "are CHAMPIONS —" : youWon ? "win" : "lose";
     ctx.fillText(
-      `${you.playerName} & ${you.proName} ${youWon ? "win" : "lose"} ${script.finalScore.a}–${script.finalScore.b}`,
+      `${you.playerName} & ${you.proName} ${verb} ${script.finalScore.a}–${script.finalScore.b}`,
       W / 2,
       H / 2 + 5
     );

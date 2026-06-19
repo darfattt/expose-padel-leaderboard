@@ -13,6 +13,8 @@ import {
   type TournamentEntry,
 } from "@/lib/sim/tournament";
 import { TEAM_A_COLOR, TEAM_B_COLOR } from "@/lib/sim/matchup";
+import ShareRun from "./ShareRun";
+import { buildRunSummary } from "./share";
 
 const GREEN = "#0a6b56";
 const CORAL = "#d6502f";
@@ -46,6 +48,12 @@ export default function TournamentArena({
   const finished = revealed >= t.rounds.length;
   const currentRound = finished ? null : t.rounds[revealed];
   const yourMatch = currentRound?.matches.find((m) => m.isYours) ?? null;
+
+  // The furthest round whose result you've actually seen — a your-match is decided
+  // once you've advanced past its round (revealed > i) or it has settled this round.
+  // Drives the shareable summary so it never leaks an unrevealed result.
+  const throughRoundIndex = finished ? t.rounds.length - 1 : settled ? revealed : revealed - 1;
+  const summary = buildRunSummary(t, throughRoundIndex);
 
   const reroll = () => {
     const next = (Math.floor(Math.random() * 0xffffffff) ^ (seed + 0x9e3779b9)) >>> 0;
@@ -116,6 +124,10 @@ export default function TournamentArena({
             nextLabel={nextStageLabel(t.rounds, revealed)}
           />
         )}
+
+        {/* Share your latest result / run to social — appears once a match of
+            yours has been decided. */}
+        {summary && <ShareRun summary={summary} />}
       </section>
 
       {/* The bracket — revealed progressively */}
@@ -163,6 +175,9 @@ function YourMatch({
   const oppGames = watched.filter((s) => s.winner === "B").length;
   const seriesDecided = youGames === 2 || oppGames === 2 || !bestOf3;
   const youWonMatch = match.result.winner === "A";
+  // The title-clinching game: winning *this* game of the final is what crowns you
+  // — that's the one that earns the trophy + photographer celebration.
+  const finaleWin = bestOf3 && match.round === "F" && script?.winner === "A" && youGames === 2;
 
   if (!script) return null;
 
@@ -189,6 +204,7 @@ function YourMatch({
         avatarA={youAvatar}
         avatarB={oppAvatar}
         deathSide={match.result.gearlessSide ?? undefined}
+        finale={finaleWin}
         autoPlay={gameIdx > 0}
         collapsibleCommentary
         commentaryDefaultOpen={false}

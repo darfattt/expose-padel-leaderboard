@@ -340,6 +340,164 @@ export function drawDefeat(
   ctx.globalAlpha = 1;
 }
 
+// The grand version of the win celebration, reserved for lifting the trophy
+// (the tournament final). On top of the confetti rain, a golden cup rises and
+// gleams while a photographer strides in from the side and snaps flash photos of
+// the champion — "the fotografer coming to foto you". `t` is the free-running
+// celebration clock in ms; pure + deterministic like the other celebration draws.
+export function drawChampionCelebration(
+  ctx: CanvasRenderingContext2D,
+  t: number,
+  x0: number,
+  x1: number,
+  yTop: number,
+  yBottom: number
+) {
+  // A denser confetti shower than a normal win.
+  drawConfetti(ctx, t, x0, x1, yTop, yBottom, 54);
+
+  // Trophy drops in from above and settles near the top of the court.
+  const rise = clamp(t / 600, 0, 1);
+  const ease = 1 - Math.pow(1 - rise, 3);
+  const s = 1.15 + 0.05 * Math.sin(t / 260); // gentle idle shimmer in scale
+  const cxc = (x0 + x1) / 2;
+  const ty = yTop + 38 - (1 - ease) * 22;
+  ctx.globalAlpha = ease;
+  drawTrophy(ctx, cxc, ty, s, t);
+  ctx.globalAlpha = 1;
+
+  // The photographer strides in and the camera fires on a steady cadence.
+  drawPhotographer(ctx, t, x0, yBottom);
+
+  // Each snap throws a brief white veil over the whole frame (the flash blowing
+  // out the shot). The canvas clips the oversized rect to its bounds.
+  const phase = t % 1300;
+  if (t > 480 && phase < 110) {
+    ctx.globalAlpha = 0.45 * (1 - phase / 110);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, x1 + 80, yBottom + 80);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// A little golden cup: bowl with two handles, stem, tiered base, and a twinkling
+// shine. Centred at (x, y) — the bowl rim sits a touch above y — scaled by s.
+function drawTrophy(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, seed: number) {
+  const GOLD = "#f5c518";
+  const GOLD_HI = "#fff0a0";
+  const GOLD_LO = "#c79a10";
+
+  // Base — two stacked tiers.
+  ctx.fillStyle = GOLD_LO;
+  ctx.fillRect(x - 7 * s, y + 11 * s, 14 * s, 2.5 * s);
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(x - 4.5 * s, y + 8 * s, 9 * s, 3 * s);
+  // Stem.
+  ctx.fillRect(x - 1.5 * s, y + 4 * s, 3 * s, 4.5 * s);
+
+  // Handles — open loops on each side of the bowl.
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = Math.max(1, 1.6 * s);
+  ctx.beginPath();
+  ctx.arc(x - 8 * s, y - 4 * s, 4 * s, Math.PI * 1.35, Math.PI * 0.5, true);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + 8 * s, y - 4 * s, 4 * s, Math.PI * 1.65, Math.PI * 0.5, false);
+  ctx.stroke();
+
+  // Bowl — a cup tapering down to the stem.
+  ctx.fillStyle = GOLD;
+  ctx.beginPath();
+  ctx.moveTo(x - 9 * s, y - 9 * s);
+  ctx.lineTo(x + 9 * s, y - 9 * s);
+  ctx.lineTo(x + 4.5 * s, y + 4 * s);
+  ctx.lineTo(x - 4.5 * s, y + 4 * s);
+  ctx.closePath();
+  ctx.fill();
+  // Rim cap across the top.
+  ctx.fillStyle = GOLD_HI;
+  ctx.fillRect(x - 9 * s, y - 10 * s, 18 * s, 2 * s);
+  // Soft inner shadow down one side for a little volume.
+  ctx.fillStyle = GOLD_LO;
+  ctx.beginPath();
+  ctx.moveTo(x + 9 * s, y - 9 * s);
+  ctx.lineTo(x + 5.5 * s, y - 9 * s);
+  ctx.lineTo(x + 2.5 * s, y + 4 * s);
+  ctx.lineTo(x + 4.5 * s, y + 4 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  // A twinkling shine star that pulses on the bowl.
+  const tw = 0.5 + 0.5 * Math.sin(seed / 140);
+  ctx.globalAlpha = 0.6 + 0.4 * tw;
+  ctx.fillStyle = "#ffffff";
+  star(ctx, x - 3 * s, y - 5 * s, (1.5 + tw) * s, 0.6 * s);
+  ctx.globalAlpha = 1;
+}
+
+// A photographer who strides in from the left edge and lifts a camera to snap the
+// champion. The figure eases in over ~700ms, then the flash bulb fires in step
+// with the screen-flash cadence in drawChampionCelebration.
+function drawPhotographer(ctx: CanvasRenderingContext2D, t: number, x0: number, yBottom: number) {
+  const enter = clamp(t / 700, 0, 1);
+  const e = 1 - Math.pow(1 - enter, 2);
+  const px = Math.round(x0 - 6 + e * 30);
+  const py = Math.round(yBottom - 4); // feet
+
+  // Ground shadow.
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.fillRect(px - 5, py + 1, 13, 2);
+  // Legs.
+  ctx.fillStyle = "#23262e";
+  ctx.fillRect(px - 3, py - 6, 2, 6);
+  ctx.fillRect(px + 1, py - 6, 2, 6);
+  // Vest torso, with a couple of pockets.
+  ctx.fillStyle = "#39414f";
+  ctx.fillRect(px - 4, py - 16, 8, 11);
+  ctx.fillStyle = "#2b313c";
+  ctx.fillRect(px - 3, py - 12, 2, 2);
+  ctx.fillRect(px + 1, py - 12, 2, 2);
+  // Head + cap (brim points toward the action).
+  ctx.fillStyle = "#e0a878";
+  ctx.fillRect(px - 2, py - 22, 5, 5);
+  ctx.fillStyle = "#1f242c";
+  ctx.fillRect(px - 3, py - 23, 6, 2);
+  ctx.fillRect(px + 3, py - 22, 2, 1);
+  // Arm raised to the camera.
+  ctx.fillStyle = "#39414f";
+  ctx.fillRect(px + 3, py - 18, 3, 2);
+
+  // Camera held to the face, pointing right at the champion.
+  const camX = px + 6;
+  const camY = py - 21;
+  ctx.fillStyle = "#15181c";
+  ctx.fillRect(camX, camY, 8, 6);
+  ctx.fillStyle = "#3a4048";
+  circle(ctx, camX + 8, camY + 3, 2);
+  ctx.fillStyle = "#0a0c0f";
+  circle(ctx, camX + 8, camY + 3, 1);
+  // Flash bulb on top.
+  ctx.fillStyle = "#cfd6de";
+  ctx.fillRect(camX + 2, camY - 2, 3, 2);
+
+  // The bulb fires — a burst at the camera plus a light cone toward the champion.
+  const phase = t % 1300;
+  if (t > 480 && phase < 110) {
+    const a = 1 - phase / 110;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = "#fffbe0";
+    star(ctx, camX + 3.5, camY - 1, 5, 2);
+    ctx.globalAlpha = a * 0.35;
+    ctx.beginPath();
+    ctx.moveTo(camX + 5, camY - 1);
+    ctx.lineTo(camX + 46, camY - 18);
+    ctx.lineTo(camX + 46, camY + 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
 // --- per-skill effects ------------------------------------------------------
 
 export function drawSkillFx(

@@ -23,6 +23,11 @@ body {
   .btn-secondary {
     @apply inline-flex items-center gap-1 text-base text-ink underline underline-offset-4 hover:opacity-70;
   }
+  /* Coral pill CTA — a featured action that stands apart from the near-black
+     primary (used to spotlight "Enter tournament" alongside "Upload scoresheet"). */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-coral px-6 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90;
+  }
   .btn-outline {
     @apply inline-flex items-center rounded-xl border border-primary px-3 py-1.5 text-sm text-primary transition-colors hover:bg-primary hover:text-white;
   }

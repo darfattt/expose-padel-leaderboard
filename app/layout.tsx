@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
+import { DesktopNav, MobileNav } from "./components/SiteNav";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -31,23 +32,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <span className="opacity-90"></span>
         </div>
 
-        {/* 3-zone nav */}
-        <header className="flex items-center justify-between px-6 py-4 border-b border-hairline">
+        {/* 3-zone nav (relative so the mobile menu panel can anchor to it) */}
+        <header className="relative flex items-center justify-between gap-4 px-6 py-4 border-b border-hairline">
           <Link href="/" className="font-display text-lg tracking-tight">
             expose<span className="text-coral">.padel-leaderboard</span>
           </Link>
-          <nav className="hidden sm:flex items-center gap-8 text-sm text-body-muted">
-            <Link href="/" className="hover:text-ink">Leaderboard</Link>
-            <Link href="/trends" className="hover:text-ink">Trends</Link>
-            <Link href="/matrix" className="hover:text-ink">Matrix</Link>
-            <Link href="/scatter" className="hover:text-ink">Scatter</Link>
-            <Link href="/versus" className="hover:text-ink">Versus</Link>
-            <Link href="/tournament" className="hover:text-ink">Tournament</Link>
-            <Link href="/rackets" className="hover:text-ink">Rackets</Link>
-            <Link href="/events" className="hover:text-ink">Events</Link>
-            <Link href="/how-it-works" className="hover:text-ink">How it works</Link>
-          </nav>
-          <Link href="/upload" className="btn-primary">Upload scoresheet</Link>
+          <DesktopNav />
+          {/* Desktop CTAs — Enter tournament gets a featured coral pill, spotlighted
+              alongside the near-black Upload scoresheet. */}
+          <div className="hidden md:flex items-center gap-3">
+            <Link href="/tournament" className="btn-accent">Enter tournament</Link>
+            <Link href="/upload" className="btn-primary">Upload scoresheet</Link>
+          </div>
+          <MobileNav />
         </header>
 
         <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-section">{children}</main>
