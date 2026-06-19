@@ -77,4 +77,13 @@ describe("signatureKudos", () => {
     expect(signatureKudos({ ...FLAT, attack: 85 }, "attack", "power")).toBe("smash");
     expect(signatureKudos({ ...FLAT, clutch: 90 }, "clutch", "balanced")).toBe("bandeja");
   });
+
+  it("an overwhelming attacker graduates to a multi-ball signature", () => {
+    // A dominant power attacker buries them under a barrage of balls...
+    expect(signatureKudos({ ...FLAT, attack: 92, clutch: 78 }, "attack", "power")).toBe("barrage");
+    // ...but a power attacker who isn't clutch enough still just smashes.
+    expect(signatureKudos({ ...FLAT, attack: 92, clutch: 60 }, "attack", "power")).toBe("smash");
+    // A devastating all-round finisher (no power frame) rains a meteor shower.
+    expect(signatureKudos({ ...FLAT, attack: 85, clutch: 85 }, "win", "balanced")).toBe("meteor");
+  });
 });

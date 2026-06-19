@@ -29,7 +29,10 @@ export type FxKind =
   | "backhand"
   | "forehand"
   | "return"
-  | "smart";
+  | "smart"
+  // Multi-ball barrages — a flurry of balls overwhelms the opponent.
+  | "barrage"
+  | "meteor";
 
 // Every value FxKind can take — used to validate the `fx` token a Skill carries
 // (lib/sim/skills.ts) before trusting it as a kind.
@@ -50,6 +53,8 @@ const FX_KINDS: readonly FxKind[] = [
   "forehand",
   "return",
   "smart",
+  "barrage",
+  "meteor",
 ];
 
 // The centre net's x in canvas pixels (cx(0.5)) and the playing area's vertical
@@ -96,9 +101,15 @@ export function fxKindForSkill(name: string, token?: string | null): FxKind {
       return "allcourt";
     case "Closer Instinct":
       return "closer";
+    case "Ball Barrage":
+      return "barrage";
+    case "Meteor Shower":
+      return "meteor";
   }
   // Keyword fallback for personalised / kudos names ("Vertex Smash", "Net Storm").
   const n = name.toLowerCase();
+  if (n.includes("barrage")) return "barrage";
+  if (n.includes("meteor")) return "meteor";
   if (n.includes("smash")) return "cannon";
   if (n.includes("block") || n.includes("wall") || n.includes("defen")) return "greatwall";
   if (n.includes("volley") || n.includes("storm")) return "volley";
@@ -154,6 +165,13 @@ export function fxDynamics(kind: FxKind, p: number): { knockdown: number; shake:
     case "volley":
       // Quick hands at the net — a sharp jolt, not a topple.
       return { knockdown: 0.4 * afterHit(0.5, 0.18), shake: fade(0.5, 0.25, 1.4) };
+    case "barrage":
+      // A wall of balls — flattens the victim and rattles the whole court as it
+      // builds, each ball adding to the rumble.
+      return { knockdown: afterHit(0.5, 0.1), shake: fade(0.18, 0.7, 3.6) };
+    case "meteor":
+      // Overheads raining down — the heaviest hit, with a long climbing rumble.
+      return { knockdown: afterHit(0.5, 0.12), shake: fade(0.2, 0.65, 3.8) };
     default:
       return { knockdown: 0, shake: 0 }; // wall, greatwall, lob, smart — feet stay planted
   }
@@ -194,9 +212,30 @@ export function fxImpactFraction(kind: FxKind): number {
       return 0.5;
     case "return":
       return 0.55;
+    case "barrage":
+    case "meteor":
+      return 0.5; // the final, heaviest ball lands — see drawBarrage/drawMeteor
     default:
       return 0.12; // smart play — the spark is early and lingering
   }
+}
+
+// The heaviest strikes don't just topple the victim — they blast them clean off
+// the court and into the back glass (the renderer flings the sprite out of the
+// pitch and cracks the wall where they land). Defensive / finesse moves don't.
+export function fxLaunchesVictim(kind: FxKind): boolean {
+  return kind === "cannon" || kind === "forehand" || kind === "barrage" || kind === "meteor";
+}
+
+// How far through the "flung off the pitch" arc the victim is, 0..1: zero until
+// the strike lands (fxImpactFraction), then ramps to 1 as they sail into the
+// wall. The renderer maps this to the outward launch + the crashing arc, and to
+// how far the glass crack has spread. Returns 0 for non-launching kinds.
+export function fxLaunch(kind: FxKind, p: number): number {
+  if (!fxLaunchesVictim(kind)) return 0;
+  const hit = fxImpactFraction(kind);
+  if (p <= hit) return 0;
+  return Math.min(1, (p - hit) / (1 - hit));
 }
 
 // --- low-level helpers ------------------------------------------------------
@@ -344,7 +383,76 @@ export function drawSkillFx(
       return drawReturn(ctx, p, g, color, seed);
     case "smart":
       return drawSmart(ctx, p, g, color);
+    case "barrage":
+      return drawBarrage(ctx, p, g, color, seed);
+    case "meteor":
+      return drawMeteor(ctx, p, g, seed);
   }
+}
+
+// Glass-wall crack — a spider-web fracture blooms where a launched victim crashes
+// into the back glass: a bright impact star, jagged radial spokes, a couple of
+// web rings, and a few slivers shaking loose and dropping. `p` (0..1) grows the
+// fracture; drawn by MatchSim at the wall point after a heavy strike lands. Pure
+// overlay (no save/restore — resets globalAlpha to 1 like the per-skill draws).
+export function drawGlassCrack(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  x: number,
+  y: number,
+  seed: number
+) {
+  const reach = 6 + p * 26;
+  // Bright flash at the point of impact, fading as the cracks take over.
+  ctx.globalAlpha = Math.max(0, 1 - p * 1.4);
+  ctx.fillStyle = "#ffffff";
+  circle(ctx, x, y, 2 + 4 * (1 - p));
+  // Jagged radial spokes racing outward.
+  ctx.globalAlpha = Math.min(1, 0.55 + p * 0.45);
+  ctx.strokeStyle = "rgba(225,242,255,0.92)";
+  ctx.lineWidth = 1;
+  const spokes = 8;
+  for (let i = 0; i < spokes; i++) {
+    const a = i * ((Math.PI * 2) / spokes) + (rand(seed, i) - 0.5) * 0.5;
+    const len = reach * (0.6 + 0.4 * rand(seed, i + 9));
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    const segs = 3;
+    for (let s = 1; s <= segs; s++) {
+      const u = s / segs;
+      const jit = (rand(seed, i * 7 + s) - 0.5) * 5;
+      const sx = x + Math.cos(a) * len * u + Math.cos(a + Math.PI / 2) * jit;
+      const sy = y + Math.sin(a) * len * u + Math.sin(a + Math.PI / 2) * jit;
+      ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+  }
+  // A couple of web rings linking the spokes.
+  for (let r = 1; r <= 2; r++) {
+    const rr = (reach * r) / 3;
+    ctx.globalAlpha = Math.min(1, p) * Math.max(0, 0.5 - r * 0.12);
+    ctx.beginPath();
+    for (let i = 0; i <= spokes; i++) {
+      const a = i * ((Math.PI * 2) / spokes);
+      const rx = x + Math.cos(a) * rr;
+      const ry = y + Math.sin(a) * rr;
+      if (i) ctx.lineTo(rx, ry);
+      else ctx.moveTo(rx, ry);
+    }
+    ctx.stroke();
+  }
+  // A few glass slivers shaking loose and dropping once the fracture is open.
+  if (p > 0.4) {
+    const e = (p - 0.4) / 0.6;
+    ctx.fillStyle = "rgba(205,237,255,0.75)";
+    for (let i = 0; i < 5; i++) {
+      const sx = x + (rand(seed, i) - 0.5) * reach;
+      const sy = y + e * e * 30 * (0.5 + rand(seed, i + 2));
+      ctx.globalAlpha = Math.max(0, 1 - e);
+      ctx.fillRect(Math.round(sx), Math.round(sy), 1, 2);
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 // Cannon Smash — a cannonball arcs over, then detonates on the opponent.
@@ -1223,5 +1331,168 @@ function drawReturn(
       }
       ctx.globalAlpha = 1;
     }
+  }
+}
+
+// Ball Barrage — a flurry of balls hammered one after another: a strung-out stream
+// of balls streaks from the striker to the victim, each launched a beat apart with
+// a muzzle flash and a motion-blur tail, then the final ball detonates and the
+// whole volley scatters off the victim. The multi-ball overwhelming attack.
+function drawBarrage(
+  ctx: CanvasRenderingContext2D,
+  p: number,
+  g: FxGeom,
+  color: string,
+  seed: number
+) {
+  const hit = 0.5;
+  const N = 6; // balls in the volley
+  if (p < hit) {
+    const t = p / hit;
+    for (let i = 0; i < N; i++) {
+      const delay = i * 0.13;
+      const u = clamp((t - delay) / (1 - delay), 0, 1);
+      if (u <= 0) continue;
+      const bx = lerp(g.ax, g.vx, u);
+      const by = lerp(g.ay, g.vy, u) - 18 * Math.sin(Math.PI * u);
+      // motion-blur tail behind each ball
+      for (let k = 1; k <= 2; k++) {
+        const uu = clamp(u - k * 0.06, 0, 1);
+        ctx.globalAlpha = 0.2 * (1 - k / 3);
+        ctx.fillStyle = color;
+        ctx.fillRect(
+          Math.round(lerp(g.ax, g.vx, uu)) - 1,
+          Math.round(lerp(g.ay, g.vy, uu) - 18 * Math.sin(Math.PI * uu)) - 1,
+          2,
+          2
+        );
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#e8f94a";
+      circle(ctx, bx, by, 2.2);
+      // muzzle flash as each ball leaves the racket
+      if (u < 0.12) {
+        ctx.globalAlpha = 1 - u / 0.12;
+        ctx.fillStyle = "#fff2c2";
+        star(ctx, g.ax, g.ay, 6, 2);
+        ctx.globalAlpha = 1;
+      }
+      // a pop where a ball thuds into the victim
+      if (u > 0.92) {
+        ctx.globalAlpha = (u - 0.92) / 0.08;
+        ctx.fillStyle = "#ffffff";
+        circle(ctx, g.vx, g.vy, 3);
+        ctx.globalAlpha = 1;
+      }
+    }
+  } else {
+    const e = (p - hit) / (1 - hit);
+    // the final ball detonates: an expanding ring + a scatter of balls bouncing off
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(g.vx, g.vy, 6 + e * 20, 0, Math.PI * 2);
+    ctx.stroke();
+    for (let i = 0; i < N; i++) {
+      const a = i * ((Math.PI * 2) / N) + seed;
+      const d = e * (10 + 16 * rand(seed, i));
+      ctx.fillStyle = "#e8f94a";
+      circle(ctx, g.vx + Math.cos(a) * d, g.vy + Math.sin(a) * d - e * 6, 2);
+    }
+    if (e < 0.4) {
+      ctx.globalAlpha = 1 - e / 0.4;
+      ctx.fillStyle = "#ffffff";
+      circle(ctx, g.vx, g.vy, 3 + 6 * (1 - e / 0.4));
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Meteor Shower — a rain of overheads crashing down from above: several flaming
+// balls streak down on slanted trails into a spread around the victim, each
+// splashing as it lands, then a final fireball blast throws embers and curling
+// smoke. The other multi-ball attack, coming from the sky rather than head-on.
+function drawMeteor(ctx: CanvasRenderingContext2D, p: number, g: FxGeom, seed: number) {
+  const hit = 0.5;
+  const N = 6; // meteors raining in
+  if (p < hit) {
+    const t = p / hit;
+    for (let i = 0; i < N; i++) {
+      const delay = i * 0.1;
+      const u = clamp((t - delay) / (1 - delay), 0, 1);
+      if (u <= 0) continue;
+      const tx = g.vx + (i - (N - 1) / 2) * 6 + (rand(seed, i) - 0.5) * 6;
+      const sx0 = tx - 22; // start up and to the side, fall in on a slant
+      const sy0 = COURT_TOP - 14;
+      const mx = lerp(sx0, tx, u);
+      const my = lerp(sy0, g.vy, u);
+      // fiery trail streaming behind the meteor
+      for (let k = 1; k <= 4; k++) {
+        const uu = clamp(u - k * 0.05, 0, 1);
+        ctx.globalAlpha = 0.4 * (1 - k / 5);
+        ctx.fillStyle = k % 2 ? "#ff7a1a" : "#ffd24a";
+        ctx.fillRect(Math.round(lerp(sx0, tx, uu)), Math.round(lerp(sy0, g.vy, uu)), 2, 2);
+      }
+      ctx.globalAlpha = 1;
+      // the burning head
+      ctx.fillStyle = "#ff5c5c";
+      circle(ctx, mx, my, 2.6);
+      ctx.fillStyle = "#ffe98a";
+      circle(ctx, mx, my, 1.2);
+      // a splash ring where a meteor lands
+      if (u > 0.9) {
+        const f = (u - 0.9) / 0.1;
+        ctx.globalAlpha = f;
+        ctx.strokeStyle = "#ff9d2a";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(tx, g.vy, 4 * f + 1, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+  } else {
+    const e = (p - hit) / (1 - hit);
+    const R = 6 + e * 20;
+    // final blast ring
+    ctx.globalAlpha = Math.max(0, 1 - e);
+    ctx.strokeStyle = "#ff9d2a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(g.vx, g.vy, R, 0, Math.PI * 2);
+    ctx.stroke();
+    // flying embers
+    for (let i = 0; i < 10; i++) {
+      const a = i * ((Math.PI * 2) / 10) + seed;
+      const d = R * (0.5 + 0.5 * rand(seed, i));
+      ctx.fillStyle = i % 2 ? "#ffd24a" : "#ff5c5c";
+      ctx.fillRect(
+        Math.round(g.vx + Math.cos(a) * d) - 1,
+        Math.round(g.vy + Math.sin(a) * d - e * 10) - 1,
+        2,
+        2
+      );
+    }
+    // hot white core
+    if (e < 0.4) {
+      ctx.globalAlpha = 1 - e / 0.4;
+      ctx.fillStyle = "#fff2c2";
+      circle(ctx, g.vx, g.vy, 3 + 6 * (1 - e / 0.4));
+    }
+    // dark smoke curling up as it dies down
+    if (e > 0.4) {
+      ctx.globalAlpha = (e - 0.4) * 0.5;
+      ctx.fillStyle = "#5a5450";
+      for (let i = 0; i < 4; i++) {
+        ctx.fillRect(
+          Math.round(g.vx + (rand(seed, i) - 0.5) * 12),
+          Math.round(g.vy - 8 - e * 14 - i * 3),
+          3,
+          3
+        );
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 }

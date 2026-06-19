@@ -76,7 +76,10 @@ export type KudosKind =
   | "bandeja"
   | "vibora"
   | "serve"
-  | "speed";
+  | "speed"
+  // Multi-ball signatures — an overwhelming flurry of balls at the opponent.
+  | "barrage"
+  | "meteor";
 
 const KUDOS_SKILL: Record<KudosKind, { name: string; effect: string; fx: string }> = {
   volley: {
@@ -134,6 +137,16 @@ const KUDOS_SKILL: Record<KudosKind, { name: string; effect: string; fx: string 
     effect: "Covers every blade of court — gone before the ball lands.",
     fx: "allcourt",
   },
+  barrage: {
+    name: "Ball Barrage",
+    effect: "A relentless storm of balls hammered one after another — nowhere to hide.",
+    fx: "barrage",
+  },
+  meteor: {
+    name: "Meteor Shower",
+    effect: "A rain of overheads crashing down from every angle at once.",
+    fx: "meteor",
+  },
 };
 
 // A player's signature Reclub kudos, derived deterministically from the grounded
@@ -154,9 +167,16 @@ export function signatureKudos(
   // reliable counter return.
   if (primary === "consistency") return consistency >= 60 ? "lob" : "return";
   // Attackers and closers: a power frame smashes; otherwise a flat finisher drives
-  // the forehand, while a spin-first attacker whips the backhand.
+  // the forehand, while a spin-first attacker whips the backhand. The truly
+  // overwhelming attackers graduate to a multi-ball signature.
   if (primary === "attack" || primary === "win") {
-    if (style === "power") return "smash";
+    if (style === "power") {
+      // A dominant power attacker buries the opponent under a barrage of balls.
+      if (attack >= 85 && clutch >= 70) return "barrage";
+      return "smash";
+    }
+    // A devastating all-round finisher calls down a meteor shower of overheads.
+    if (attack >= 80 && clutch >= 80) return "meteor";
     return clutch >= consistency ? "forehand" : "backhand";
   }
   // Balanced all-courters: a control frame returns, otherwise they live at the net.

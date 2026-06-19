@@ -104,8 +104,29 @@ describe("avatarFromName", () => {
     const base = avatarFromName("Grace Hopper");
     const tinted = avatarFromName("Grace Hopper", "#123456");
     expect(tinted.kit).toBe("#123456");
-    expect(tinted.skin).toBe(base.skin);
-    expect(tinted.stance).toBe(base.stance);
+    // The override never desyncs the rest of the stream — only the kit differs.
+    expect({ ...tinted, kit: base.kit }).toEqual(base);
+  });
+
+  it("defaults to male (shorts) when no gender is given or it is null", () => {
+    for (const a of [avatarFromName("Some Player"), avatarFromName("Some Player", undefined, null)]) {
+      expect(a.gender).toBe("male");
+      expect(a.bottom).toBe("shorts");
+      expect([0, 1, 2, 3]).toContain(a.hairStyle); // never a women's-only style
+      expect(["none", "hat", "bandana", "glasses", "crown"]).toContain(a.accessory);
+    }
+  });
+
+  it("a gender hint pins the gender, skirt/shorts and an apt hairstyle", () => {
+    const f = avatarFromName("Some Player", undefined, "female");
+    expect(f.gender).toBe("female");
+    expect(f.bottom).toBe("skirt"); // celana rok for women
+    expect([2, 4, 5]).toContain(f.hairStyle); // always worn long
+
+    const m = avatarFromName("Some Player", undefined, "male");
+    expect(m.gender).toBe("male");
+    expect(m.bottom).toBe("shorts");
+    expect([0, 1, 2, 3]).toContain(m.hairStyle);
   });
 });
 
@@ -135,5 +156,20 @@ describe("buildTeam", () => {
     expect(JSON.stringify(buildTeam(p, "A", "#003c33"))).toEqual(
       JSON.stringify(buildTeam(p, "A", "#003c33"))
     );
+  });
+
+  it("matches both on-court sprites to the player's gender", () => {
+    const women = buildTeam({ ...p, gender: "female" }, "A", "#003c33");
+    for (const av of women.avatars) {
+      expect(av.gender).toBe("female");
+      expect(av.bottom).toBe("skirt");
+    }
+    const men = buildTeam({ ...p, gender: "male" }, "A", "#003c33");
+    for (const av of men.avatars) {
+      expect(av.gender).toBe("male");
+      expect(av.bottom).toBe("shorts");
+    }
+    // A women's player gets a women's pro, not the men's-ladder default.
+    expect(women.proName).not.toBe(men.proName);
   });
 });

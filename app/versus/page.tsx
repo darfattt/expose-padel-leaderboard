@@ -590,6 +590,7 @@ function simPlayer(
     experienceGames: player.row.games,
     form,
     morale: badgeMorale(player, matches, gear, field, reclubLinked),
+    gender: gear.gender, // women's player → women's pro partner + a female sprite
   };
 }
 

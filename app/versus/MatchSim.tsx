@@ -8,10 +8,13 @@ import { drawAvatar, type AvatarPose } from "./avatar-sprite";
 import {
   drawConfetti,
   drawDefeat,
+  drawGlassCrack,
   drawSkillFx,
   fxDynamics,
   fxImpactFraction,
   fxKindForSkill,
+  fxLaunch,
+  fxLaunchesVictim,
   type FxKind,
 } from "./skill-fx";
 
@@ -575,6 +578,18 @@ export default function MatchSim({
         sweep(420 * k, 1100 * k, 150, "sawtooth", 0.14, 110);
         blip(1500 * k, 45, "square", 0.08, 250);
         break;
+      case "barrage":
+        // a machine-gun stutter of ball thuds, then a heavy detonation.
+        for (let i = 0; i < 6; i++) blip((520 - i * 30) * k, 40, "square", 0.09, i * 70);
+        blip(150 * k, 200, "sine", 0.22, 430);
+        blip(90 * k, 240, "sine", 0.18, 470);
+        break;
+      case "meteor":
+        // descending whistles raining in, then a string of explosions.
+        for (let i = 0; i < 4; i++) sweep(1400 * k, 300 * k, 150, "sawtooth", 0.1, i * 90);
+        blip(170 * k, 200, "square", 0.2, 420);
+        blip(110 * k, 260, "sine", 0.18, 470);
+        break;
       default: {
         // smart play / unrecognised — the original three-step arpeggio
         const base = team === "A" ? 660 : 500;
@@ -1050,7 +1065,18 @@ function drawScene(
     let pose: AvatarPose | undefined;
     if (fx && i === fx.victimIdx && (fx.knockdown > 0 || fx.sk.kind === "tornado")) {
       const dir = fx.attIdx < 2 ? 1 : -1; // topple/spin away from the attacker
-      if (fx.sk.kind === "tornado") {
+      const lp = fxLaunch(fx.sk.kind, fx.progress);
+      if (lp > 0) {
+        // The heaviest strikes blast the victim clean off the court: they sail
+        // outward (toward their own back glass), tumbling and arcing up before
+        // they crash. The wall crack is drawn in the fx overlay below.
+        pose = {
+          launch: dir * lp * 72,
+          arc: Math.sin(Math.PI * Math.min(1, lp)) * 16,
+          spin: lp * Math.PI * 2.4 * dir,
+        };
+        if (lp < 0.35) pose.flash = (0.35 - lp) * 1.6; // impact flash as they're hit
+      } else if (fx.sk.kind === "tornado") {
         // Caught in the funnel: whirl several full turns and lift off the ground,
         // settling back down as the effect fades — "berputar putar".
         pose = { spin: fx.progress * Math.PI * 7 * dir, lift: Math.sin(Math.PI * fx.progress) * 8 };
@@ -1103,6 +1129,18 @@ function drawScene(
     };
     const color = fx.sk.team === "A" ? "#7fe6cf" : "#ff9d85";
     drawSkillFx(ctx, fx.sk.kind, fx.progress, geom, color, fx.sk.time);
+
+    // A launched victim crashes into the back glass on their side — crack it
+    // where they hit, growing the fracture as they sail into it.
+    if (fxLaunchesVictim(fx.sk.kind)) {
+      const lp = fxLaunch(fx.sk.kind, fx.progress);
+      if (lp > 0) {
+        const dir = fx.attIdx < 2 ? 1 : -1; // flung toward their own back wall
+        const wallX = dir > 0 ? cx(1) - 2 : cx(0) + 2;
+        const wallY = clamp(cy(positions[fx.victimIdx].y), cy(0) + 8, cy(1) - 8);
+        drawGlassCrack(ctx, lp, wallX, wallY, fx.sk.time + 7);
+      }
+    }
   }
 
   ctx.restore();

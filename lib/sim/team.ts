@@ -1,6 +1,7 @@
 import type { AttributeKey, Attributes } from "../archetype";
 import { proCandidates } from "../pros";
 import { racketPlayStyle, type RacketPlayStyle } from "../racket-reco";
+import type { Gender } from "../types";
 import { avatarFromName, type AvatarSpec } from "./avatar";
 import { type PowerInput, staminaFor } from "./power";
 import { gearMoniker, signatureKudos, type Skill, teamSkills } from "./skills";
@@ -74,15 +75,22 @@ export interface TeamPlayer {
   experienceGames?: number; // career games played (veterancy → stamina + edge)
   form?: number; // recent win rate in [0,1]; 0.5 = neutral / unknown
   morale?: number; // earned good badges minus bad badges (signed)
+  gender?: Gender | null; // selects the FIP ladder for the pro + the sprite's look
 }
 
 // Build one side's team spec. The pro lookalike is the top candidate from
 // proCandidates (rank-appropriate to the rating, rotated by archetype); its rank
 // is the best (numerically lowest) offered, which is exactly candidates.pros[0].
 export function buildTeam(player: TeamPlayer, side: "A" | "B", color: string): TeamSpec {
-  const candidates = proCandidates(player.rating, player.archetypePrimary);
+  // The pro lookalike (and so the partner's name + sprite) is drawn from the
+  // gender-appropriate FIP ladder — a women's player gets a women's pro, not the
+  // men's default. The same gender drives both on-court sprites' look.
+  const candidates = proCandidates(player.rating, player.archetypePrimary, player.gender);
   const proName = candidates.pros[0] ?? "Unknown Pro";
   const proRank = candidates.rankLow || 90;
+  // The player's gender pins both sprites' look; undefined leaves it name-derived
+  // (so older callers without a gender are unchanged).
+  const avatarGender = player.gender ?? undefined;
 
   // Racket play-style is grounded in the player's own attributes; we only
   // surface the racket skill when they've actually set a racket (gear optional).
@@ -102,7 +110,10 @@ export function buildTeam(player: TeamPlayer, side: "A" | "B", color: string): T
     proRank,
     stats: blendStats(player.attributes, proRank, player.experienceGames ?? 0),
     skills: teamSkills(style, player.archetypePrimary, { gearMoniker: moniker, kudos }),
-    avatars: [avatarFromName(player.name, color), avatarFromName(proName)],
+    avatars: [
+      avatarFromName(player.name, color, avatarGender),
+      avatarFromName(proName, undefined, avatarGender),
+    ],
     color,
   };
 }

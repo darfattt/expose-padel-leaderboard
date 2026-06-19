@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   drawConfetti,
   drawDefeat,
+  drawGlassCrack,
   drawSkillFx,
   fxDynamics,
   fxImpactFraction,
   fxKindForSkill,
+  fxLaunch,
+  fxLaunchesVictim,
   type FxKind,
 } from "./skill-fx";
 
@@ -56,6 +59,8 @@ const KINDS: FxKind[] = [
   "forehand",
   "return",
   "smart",
+  "barrage",
+  "meteor",
 ];
 
 describe("skill-fx", () => {
@@ -81,6 +86,36 @@ describe("skill-fx", () => {
     expect(fxKindForSkill("Forehand Drive")).toBe("forehand");
     expect(fxKindForSkill("Counter Return")).toBe("return");
     expect(fxKindForSkill("Blur Dash")).toBe("allcourt");
+  });
+
+  it("maps the multi-ball skills by name and keyword", () => {
+    expect(fxKindForSkill("Ball Barrage")).toBe("barrage");
+    expect(fxKindForSkill("Meteor Shower")).toBe("meteor");
+    expect(fxKindForSkill("Vertex Barrage")).toBe("barrage"); // personalised → keyword
+    expect(fxKindForSkill("Whatever", "meteor")).toBe("meteor"); // explicit token wins
+  });
+
+  it("only the heavy strikes launch the victim off the pitch", () => {
+    expect(fxLaunchesVictim("cannon")).toBe(true);
+    expect(fxLaunchesVictim("forehand")).toBe(true);
+    expect(fxLaunchesVictim("barrage")).toBe(true);
+    expect(fxLaunchesVictim("meteor")).toBe(true);
+    expect(fxLaunchesVictim("greatwall")).toBe(false);
+    expect(fxLaunchesVictim("smart")).toBe(false);
+    expect(fxLaunchesVictim("tornado")).toBe(false);
+  });
+
+  it("launch is zero before impact, ramps to 1 after, and stays in range", () => {
+    for (const kind of KINDS) {
+      expect(fxLaunch(kind, 0)).toBe(0); // nobody is airborne at the start
+      const launches = fxLaunchesVictim(kind);
+      expect(fxLaunch(kind, 1)).toBe(launches ? 1 : 0); // fully flung only for heavy strikes
+      for (let p = 0; p <= 1.0001; p += 0.05) {
+        const v = fxLaunch(kind, p);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    }
   });
 
   it("prefers an explicit fx token over the name", () => {
@@ -143,6 +178,14 @@ describe("skill-fx", () => {
     for (let t = 0; t < 6000; t += 120) {
       const ctx = stubCtx();
       expect(() => drawDefeat(ctx, t, 30, 450, 50, 244)).not.toThrow();
+      expect(ctx.globalAlpha).toBe(1);
+    }
+  });
+
+  it("cracks the glass across its growth without throwing and resets alpha", () => {
+    for (let p = 0; p <= 1.0001; p += 0.05) {
+      const ctx = stubCtx();
+      expect(() => drawGlassCrack(ctx, p, 440, 140, 999)).not.toThrow();
       expect(ctx.globalAlpha).toBe(1);
     }
   });
