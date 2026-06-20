@@ -141,3 +141,39 @@ describe("computeEventAwards — most improved", () => {
     expect(computeEventAwards(rows, { careerById }).mostImproved).toBeNull();
   });
 });
+
+describe("computeEventAwards — demolition", () => {
+  it("picks the single biggest blowout win", () => {
+    const rows = [
+      ...doublesMatch([["a", "Ann"], ["b", "Bob"]], 21, [["c", "Cid"], ["d", "Dee"]], 5),
+      ...doublesMatch([["c", "Cid"], ["d", "Dee"]], 21, [["a", "Ann"], ["b", "Bob"]], 19),
+    ];
+    const { demolition } = computeEventAwards(rows);
+    expect(demolition?.playerIds.sort()).toEqual(["a", "b"]);
+    expect(demolition?.detail).toContain("21–5");
+    expect(demolition?.detail).toContain("+16 margin");
+  });
+
+  it("is null when no win clears the demolition margin", () => {
+    const rows = doublesMatch([["a", "Ann"], ["b", "Bob"]], 21, [["c", "Cid"], ["d", "Dee"]], 19);
+    expect(computeEventAwards(rows).demolition).toBeNull();
+  });
+});
+
+describe("computeEventAwards — heartbreak", () => {
+  it("picks the player with the most close losses", () => {
+    const rows = [
+      ...doublesMatch([["e", "Eve"], ["f", "Fee"]], 18, [["g", "Gus"], ["h", "Hal"]], 21),
+      ...doublesMatch([["e", "Eve"], ["g", "Gus"]], 19, [["f", "Fee"], ["h", "Hal"]], 21),
+    ];
+    // Eve loses by 3 then by 2 (two heartbreakers); Fee and Gus only one each.
+    const { heartbreak } = computeEventAwards(rows);
+    expect(heartbreak?.playerIds).toEqual(["e"]);
+    expect(heartbreak?.detail).toContain("2 losses");
+  });
+
+  it("is null with only a single close loss (no story)", () => {
+    const rows = doublesMatch([["e", "Eve"], ["f", "Fee"]], 18, [["g", "Gus"], ["h", "Hal"]], 21);
+    expect(computeEventAwards(rows).heartbreak).toBeNull();
+  });
+});

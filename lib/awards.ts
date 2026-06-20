@@ -9,6 +9,14 @@ import type { CareerStatRow } from "./types";
 // track record *outside* this event to judge against.
 export const MIN_BASELINE_GAMES = 3;
 
+// A loss by this margin or less is a "close" game (matches the close_games gate
+// in the SQL view). Heartbreak needs a few of these to count as a story.
+const CLOSE_MARGIN = 3;
+const MIN_HEARTBREAKS = 2;
+// A win has to clear this margin to earn the "Demolition" tag — a 3–2 isn't a
+// beatdown. Big enough that a one-point win never qualifies on any scale.
+const MIN_DEMOLITION_MARGIN = 4;
+
 // One award recipient: the player(s) honoured plus a short stat line. names and
 // playerIds run in parallel so the UI can link each name to its profile.
 export interface AwardWinner {
@@ -22,6 +30,8 @@ export interface EventAwards {
   bestPartnership: AwardWinner | null; // duo that outscored opponents by the most
   biggestUpset: AwardWinner | null; // lowest-rated team that beat a higher-rated one
   mostImproved: AwardWinner | null; // night most above the player's usual level
+  demolition: AwardWinner | null; // single biggest blowout win of the night
+  heartbreak: AwardWinner | null; // most close losses (margin <= CLOSE_MARGIN)
 }
 
 export interface AwardContext {
@@ -211,9 +221,54 @@ function pickMostImproved(players: PlayerAgg[], careerById?: Map<string, CareerS
   };
 }
 
-// Compute all four awards for an event. Each is null when the data can't support
-// it (no players, no doubles pairings, missing ratings/career context, or no
-// genuine upset / improvement), so the UI only renders awards that have a story.
+// The single most lopsided win of the night — the headline beatdown.
+function pickDemolition(groups: MatchGroup[]): AwardWinner | null {
+  let best: { winner: TeamSide; loser: TeamSide; margin: number } | null = null;
+  for (const g of groups) {
+    if (g.sides.length !== 2) continue;
+    const [a, b] = g.sides;
+    if (a.isDraw || b.isDraw) continue;
+    const winner = a.won ? a : b;
+    const loser = a.won ? b : a;
+    const margin = winner.score - loser.score;
+    if (margin >= MIN_DEMOLITION_MARGIN && (best === null || margin > best.margin)) {
+      best = { winner, loser, margin };
+    }
+  }
+  if (!best) return null;
+  return {
+    playerIds: best.winner.playerIds,
+    names: best.winner.names,
+    detail: `won ${best.winner.score}–${best.loser.score} · +${best.margin} margin`,
+  };
+}
+
+// Most close losses on the night — so near, so often.
+function pickHeartbreak(rows: EventPlayerResult[]): AwardWinner | null {
+  const acc = new Map<string, { id: string; name: string; count: number }>();
+  for (const r of rows) {
+    if (r.won || r.isDraw) continue;
+    const margin = r.conceded - r.points;
+    if (margin > 0 && margin <= CLOSE_MARGIN) {
+      const e = acc.get(r.playerId) ?? { id: r.playerId, name: r.name, count: 0 };
+      e.count += 1;
+      acc.set(r.playerId, e);
+    }
+  }
+  const ranked = [...acc.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const top = ranked[0];
+  if (!top || top.count < MIN_HEARTBREAKS) return null;
+  return {
+    playerIds: [top.id],
+    names: [top.name],
+    detail: `${top.count} losses by ≤${CLOSE_MARGIN} — so close`,
+  };
+}
+
+// Compute every award for an event. Each is null when the data can't support it
+// (no players, no doubles pairings, missing ratings/career context, no genuine
+// upset / improvement / blowout / run of near-misses), so the UI only renders
+// awards that have a story.
 export function computeEventAwards(rows: EventPlayerResult[], ctx: AwardContext = {}): EventAwards {
   const groups = groupByMatch(rows);
   const players = aggregateByPlayer(rows);
@@ -222,5 +277,7 @@ export function computeEventAwards(rows: EventPlayerResult[], ctx: AwardContext 
     bestPartnership: pickBestPartnership(groups),
     biggestUpset: pickBiggestUpset(groups, ctx.ratingById),
     mostImproved: pickMostImproved(players, ctx.careerById),
+    demolition: pickDemolition(groups),
+    heartbreak: pickHeartbreak(rows),
   };
 }

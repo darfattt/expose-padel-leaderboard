@@ -166,6 +166,12 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
 
+      <div className="mb-8">
+        <Link href={`/wrapped/${id}`} className="btn-primary text-sm">
+          🎬 View {r.name}&apos;s Padel Wrapped
+        </Link>
+      </div>
+
       {/* Reliability gate: shown only while it actively caps the *skill* rating
           (the pre-rust base), so inactivity rust never masks an earned gate. */}
       <ReliabilityGate score={r.norm_point_diff ?? r.point_diff} wins={r.wins} rating={player.baseRating} />

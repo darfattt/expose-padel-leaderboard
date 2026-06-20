@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getOrCreateEventRecap } from "@/app/actions/recap";
+import ShareButton from "@/app/components/ShareButton";
 import { computeEventAwards } from "@/lib/awards";
 import { fetchCareerStats, getLeaderboard } from "@/lib/leaderboard";
 import { getEvent, getEventPlayerResults, getEventResults } from "@/lib/queries";
+import { buildEventRecap, buildRecapCaption } from "@/lib/recap";
 import EventAwards from "./EventAwards";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +27,14 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     ratingById: new Map(board.map((p) => [p.row.player_id, p.rating])),
     careerById: new Map(career.map((c) => [c.player_id, c])),
   });
+
+  // LLM one-liners + headline for the recap (cached; null when reports disabled,
+  // in which case the card/cards fall back to the deterministic stat lines).
+  const recap = await getOrCreateEventRecap(id);
+  const recapEvent = { title: event.title, playedOn: event.played_on, location: event.location };
+  const recapSpec = buildEventRecap(recapEvent, awards, recap?.quips, recap?.headline);
+  const recapCaption = buildRecapCaption(recapEvent, awards, recap?.quips, recap?.headline);
+  const hasAwards = recapSpec.rows != null && recapSpec.rows.length > 0;
 
   // Group by round for a court-by-court layout.
   const rounds = new Map<number, typeof matches>();
@@ -64,7 +75,20 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      <EventAwards awards={awards} />
+      <EventAwards awards={awards} quips={recap?.quips} />
+
+      {hasAwards && (
+        <div className="mb-10">
+          <ShareButton
+            spec={recapSpec}
+            caption={recapCaption}
+            shareTitle={`${event.title} — Match Night recap`}
+            filename="match-night.png"
+            label="📲 Share the recap"
+            hint="The night's awards as one card — drop it in the group chat."
+          />
+        </div>
+      )}
 
       <div className="space-y-8">
         {roundNums.map((rn) => (
