@@ -63,6 +63,25 @@ export interface CardGear {
   position?: string | null; // "Left" | "Right" | "Both"
 }
 
+// A static "post-match" 2D court scene, recreating the tournament sim's end frame
+// (lib/sim + app/versus/MatchSim) as a still on the share card: the blue court,
+// the four 8-bit players at their home spots, the scoreboard and the outcome
+// banner. `players` is exactly four in fixed order — [A player, A pro, B player,
+// B pro] — and the renderer owns their court positions, facing and label colours.
+export interface CardCourtPlayer {
+  avatar: AvatarSpec;
+  name: string;
+}
+export interface CardCourt {
+  teamAName: string; // green side (you), top-left scoreboard
+  teamBName: string; // coral side (opponent), top-right scoreboard
+  scoreA: number;
+  scoreB: number;
+  players: CardCourtPlayer[];
+  bannerText: string; // the centred outcome line, e.g. "You & Pro win 21–18"
+  win: boolean; // tints the banner + poses the figures (your side cheers / slumps)
+}
+
 export interface CardSpec {
   kicker: string; // small uppercase mono label in the header band
   title: string; // the big header line (player or event name)
@@ -75,6 +94,7 @@ export interface CardSpec {
   proPortrait?: { photoUrl?: string | null; initials: string; color: string } | null;
   gear?: CardGear | null; // racket strip above the footer
   headline?: string; // a sentence under the header
+  court?: CardCourt | null; // a post-match 2D court still, drawn under the headline
   hero?: CardHero | null;
   rows?: CardRow[];
   footer?: string; // defaults to the site wordmark
@@ -141,7 +161,40 @@ const AVATAR_R = 24; // radius of a row's player-face disc (fits within ROW_H)
 const GEAR_THUMB = 46; // side of a row's racket thumbnail tile
 const GEAR_H = 132;
 const FOOTER_H = 80;
+const COURT_GAP = 28; // breathing room below the court still
 const DEFAULT_FOOTER = "expose.padel-leaderboard";
+
+// The post-match court still keeps the sim's 16:9 (480×270) aspect, scaled to the
+// card's content width. Geometry below mirrors app/versus/MatchSim.
+const SCENE_W = 480;
+const SCENE_H = 270;
+const SCENE_PAD_X = 30;
+const SCENE_PAD_TOP = 50;
+const SCENE_PAD_BOTTOM = 26;
+const SCENE_NET_X = 0.5;
+const SCENE_SERVICE_X = [0.3, 0.7];
+const SCENE_SURROUND = "#5a7da6";
+const SCENE_COURT = "#38506a";
+const SCENE_LINE = "rgba(255,255,255,0.85)";
+// Home spots for [A front, A back, B front, B back] and their label tints, copied
+// from MatchSim so the still reads identically to the live tape.
+const SCENE_HOME = [
+  { x: 0.34, y: 0.36 },
+  { x: 0.16, y: 0.68 },
+  { x: 0.66, y: 0.36 },
+  { x: 0.84, y: 0.68 },
+];
+const SCENE_FACING: (1 | -1)[] = [1, 1, -1, -1];
+const SCENE_LABEL_COLORS = ["#dbeee9", "#bfe0d8", "#ffe0d6", "#ffcdbe"];
+
+// Width the court still spans on the card, and its derived height (incl. the gap).
+function courtBlockWidth(): number {
+  return W - PAD * 2;
+}
+function courtHeight(spec: CardSpec): number {
+  if (!spec.court) return 0;
+  return Math.round((courtBlockWidth() * SCENE_H) / SCENE_W) + COURT_GAP;
+}
 
 function rowContentHeight(r: CardRow): number {
   return r.subtitle ? ROW_H_SUB : ROW_H;
@@ -155,6 +208,7 @@ function rowHeight(r: CardRow): number {
 function bodyHeight(spec: CardSpec): number {
   let h = 0;
   if (spec.headline) h += HEADLINE_H;
+  if (spec.court) h += courtHeight(spec);
   if (spec.hero) h += HERO_H;
   h += (spec.rows ?? []).reduce((sum, r) => sum + rowHeight(r), 0);
   if (hasGear(spec)) h += GEAR_H;
@@ -267,6 +321,12 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
     ctx.font = `600 34px ${FONT_DISPLAY}`;
     ctx.fillText(trunc(ctx, spec.headline, W - PAD * 2), PAD, y + 34);
     y += HEADLINE_H;
+  }
+
+  // Post-match court still.
+  if (spec.court) {
+    drawCourtScene(ctx, spec.court, PAD, y, courtBlockWidth());
+    y += courtHeight(spec);
   }
 
   // Hero stat.
@@ -400,6 +460,105 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
   ctx.fillText(spec.footer ?? DEFAULT_FOOTER, PAD, canvas.height - 36);
 
   return canvas;
+}
+
+// Draw the post-match court still: the blue court + markings + net, the four
+// 8-bit players posed at their home spots (your side cheers on a win, slumps on a
+// loss — mirroring MatchSim's end frame), the scoreboard and the outcome banner.
+// `bw` is the on-card block width; the whole 480×270 scene scales to fit it.
+function drawCourtScene(
+  ctx: CanvasRenderingContext2D,
+  court: CardCourt,
+  bx: number,
+  by: number,
+  bw: number
+) {
+  const f = bw / SCENE_W;
+  const sx = (x: number) => SCENE_PAD_X + x * (SCENE_W - 2 * SCENE_PAD_X);
+  const sy = (y: number) => SCENE_PAD_TOP + y * (SCENE_H - SCENE_PAD_TOP - SCENE_PAD_BOTTOM);
+
+  ctx.save();
+  // Rounded clip so the still sits as a neat tile on the card body.
+  roundRect(ctx, bx, by, bw, SCENE_H * f, 16);
+  ctx.clip();
+  ctx.translate(bx, by);
+  ctx.scale(f, f);
+  ctx.imageSmoothingEnabled = false;
+
+  // Court surround + playing rectangle.
+  ctx.fillStyle = SCENE_SURROUND;
+  ctx.fillRect(0, 0, SCENE_W, SCENE_H);
+  ctx.fillStyle = SCENE_COURT;
+  ctx.fillRect(sx(0), sy(0), sx(1) - sx(0), sy(1) - sy(0));
+  // Glass-wall hint + outer boundary.
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(sx(0) + 2.5, sy(0) + 2.5, sx(1) - sx(0) - 5, sy(1) - sy(0) - 5);
+  ctx.strokeStyle = SCENE_LINE;
+  ctx.fillStyle = SCENE_LINE;
+  ctx.strokeRect(sx(0) + 0.5, sy(0) + 0.5, sx(1) - sx(0) - 1, sy(1) - sy(0) - 1);
+  // Service lines + centre service line.
+  for (const s of SCENE_SERVICE_X) ctx.fillRect(Math.round(sx(s)), sy(0), 1, sy(1) - sy(0));
+  ctx.fillRect(sx(SCENE_SERVICE_X[0]), Math.round(sy(0.5)), sx(SCENE_SERVICE_X[1]) - sx(SCENE_SERVICE_X[0]), 1);
+  // Net: centre line + posts.
+  const nx = Math.round(sx(SCENE_NET_X));
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.fillRect(nx - 1, sy(0) - 4, 2, sy(1) - sy(0) + 8);
+  ctx.fillStyle = "#1b1b1b";
+  ctx.fillRect(nx - 2, sy(0) - 6, 4, 4);
+  ctx.fillRect(nx - 2, sy(1) + 2, 4, 4);
+
+  // Players, back-to-front so nearer figures overlap farther ones.
+  const players = court.players.slice(0, 4);
+  const order = [0, 1, 2, 3]
+    .filter((i) => players[i])
+    .sort((i, j) => SCENE_HOME[i].y - SCENE_HOME[j].y);
+  ctx.textAlign = "center";
+  ctx.font = `6px ${FONT_MONO}`;
+  for (const i of order) {
+    const px = sx(SCENE_HOME[i].x);
+    const py = sy(SCENE_HOME[i].y);
+    // Your side is A (0,1). Winners hop with arms up; losers topple toward their
+    // own back wall and cry — the held celebration frame.
+    const won = court.win ? i < 2 : i >= 2;
+    const pose = won
+      ? { lift: 4, cheer: 1 }
+      : { tilt: (Math.PI / 2 - 0.14) * (i < 2 ? -1 : 1), tears: 1 };
+    drawAvatar(ctx, players[i].avatar, px, py, SCENE_FACING[i], 0, pose);
+    ctx.fillStyle = SCENE_LABEL_COLORS[i];
+    ctx.fillText(trunc(ctx, players[i].name, 96), px, py + 22);
+  }
+
+  // Loss dims the whole frame, as in the live tape's defeat overlay.
+  if (!court.win) {
+    ctx.fillStyle = "rgba(8,12,18,0.32)";
+    ctx.fillRect(0, 0, SCENE_W, SCENE_H);
+  }
+
+  // Scoreboard.
+  ctx.textAlign = "left";
+  ctx.font = `bold 12px ${FONT_MONO}`;
+  ctx.fillStyle = "#7fe6cf";
+  ctx.fillText(court.teamAName.slice(0, 10), SCENE_PAD_X, 16);
+  ctx.textAlign = "center";
+  ctx.font = `bold 16px ${FONT_MONO}`;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(`${court.scoreA} – ${court.scoreB}`, SCENE_W / 2, 18);
+  ctx.textAlign = "right";
+  ctx.font = `bold 12px ${FONT_MONO}`;
+  ctx.fillStyle = "#ff9d85";
+  ctx.fillText(court.teamBName.slice(0, 10), SCENE_W - SCENE_PAD_X, 16);
+
+  // Outcome banner.
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, SCENE_H / 2 - 22, SCENE_W, 44);
+  ctx.textAlign = "center";
+  ctx.font = `bold 16px ${FONT_MONO}`;
+  ctx.fillStyle = court.win ? "#7fe6cf" : "#ff9d85";
+  ctx.fillText(trunc(ctx, court.bannerText, SCENE_W - 24), SCENE_W / 2, SCENE_H / 2 + 5);
+
+  ctx.restore();
+  ctx.textAlign = "left";
 }
 
 // A player's face as a disc on the light card body — their Reclub photo when it
