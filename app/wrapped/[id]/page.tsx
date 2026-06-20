@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getWrappedIntro } from "@/app/actions/wrapped";
+import { getPlayerReclub } from "@/lib/queries";
 import { proPhoto } from "@/lib/pros";
+import { avatarFor } from "@/lib/reclub-avatar";
 import { formatMonth } from "@/lib/standings";
 import { buildWrapped } from "@/lib/wrapped";
 import { loadWrappedInput } from "./data";
@@ -22,8 +24,11 @@ export default async function WrappedPage({
   const load = await loadWrappedInput(id, periodParam);
   if (!load) notFound();
 
+  const reclub = await getPlayerReclub(id);
+  const avatarUrl = await avatarFor(reclub.url, reclub.avatarUrl);
+
   const intro = await getWrappedIntro(id, load.period);
-  const wrapped = buildWrapped({ ...load.input, intro });
+  const wrapped = buildWrapped({ ...load.input, intro, photoUrl: avatarUrl });
   const name = load.input.player.row.name;
 
   const periodHref = (p?: string) => (p ? `/wrapped/${id}?period=${p}` : `/wrapped/${id}`);
@@ -54,6 +59,8 @@ export default async function WrappedPage({
         spec={wrapped.card}
         caption={wrapped.caption}
         name={name}
+        gender={load.input.gender}
+        avatarUrl={avatarUrl}
         proTwinPhoto={wrapped.proTwinPhotoName ? proPhoto(wrapped.proTwinPhotoName) ?? null : null}
       />
     </div>

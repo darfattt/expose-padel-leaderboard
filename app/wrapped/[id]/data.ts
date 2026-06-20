@@ -85,7 +85,19 @@ export async function loadWrappedInput(
   const periodLabel = period === "all" ? "all time" : formatMonth(period);
 
   return {
-    input: { player, matches, careerRow, gender: gear.gender, periodLabel },
+    input: {
+      player,
+      matches,
+      careerRow,
+      gender: gear.gender,
+      periodLabel,
+      racket: {
+        name: gear.racketName,
+        brand: gear.racketBrand,
+        image: gear.racketImage,
+        position: gear.position,
+      },
+    },
     months,
     period,
   };

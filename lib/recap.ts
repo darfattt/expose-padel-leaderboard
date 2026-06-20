@@ -12,13 +12,13 @@ export type RecapQuips = Partial<Record<AwardKey, string>>;
 
 // Display order + identity for each award. Shared by the recap card and the
 // on-page Awards grid so the two never drift.
-export const RECAP_AWARDS: { key: AwardKey; label: string; badge: string }[] = [
-  { key: "mvp", label: "MVP", badge: "🏅" },
-  { key: "bestPartnership", label: "Best Duo", badge: "🤝" },
-  { key: "biggestUpset", label: "Upset", badge: "⚡" },
-  { key: "demolition", label: "Demolition", badge: "💥" },
-  { key: "mostImproved", label: "Most Improved", badge: "📈" },
-  { key: "heartbreak", label: "Heartbreak", badge: "💔" },
+export const RECAP_AWARDS: { key: AwardKey; label: string; badge: string; icon: string }[] = [
+  { key: "mvp", label: "MVP", badge: "🏅", icon: "star-medal" },
+  { key: "bestPartnership", label: "Best Duo", badge: "🤝", icon: "linked-rings" },
+  { key: "biggestUpset", label: "Upset", badge: "⚡", icon: "lightning-arc" },
+  { key: "demolition", label: "Demolition", badge: "💥", icon: "spiky-explosion" },
+  { key: "mostImproved", label: "Most Improved", badge: "📈", icon: "progression" },
+  { key: "heartbreak", label: "Heartbreak", badge: "💔", icon: "broken-heart" },
 ];
 
 export interface RecapEvent {
@@ -50,7 +50,7 @@ export function buildEventRecap(
     title: event.title,
     headline: headline || metaLine(event) || "The night in awards",
     rows: present.map((a) => ({
-      tag: a.badge,
+      icon: a.icon,
       title: `${a.label} · ${a.winner.names.join(" & ")}`,
       subtitle: quips[a.key] || a.winner.detail,
       accent: a.key !== "heartbreak", // only the wooden-spoon award reads as a knock

@@ -7,6 +7,11 @@
 // DOM-dependent (it touches `document`/`canvas`), so import only from client
 // components. Pure of any network/Supabase concerns.
 
+import { drawAvatar } from "@/app/versus/avatar-sprite";
+import { getCachedIcon } from "@/lib/icons/canvas";
+import { getCachedPhoto } from "@/lib/share/photo";
+import type { AvatarSpec } from "@/lib/sim/avatar";
+
 export const BRAND = {
   green: "#003c33",
   coral: "#ff7759",
@@ -26,6 +31,7 @@ const FONT_BODY = "Inter, system-ui, sans-serif";
 export interface CardRow {
   tag?: string;
   tagColor?: string;
+  icon?: string; // game-icons.net name; drawn in the left gutter in place of `tag`
   title: string;
   subtitle?: string;
   value?: string;
@@ -40,14 +46,48 @@ export interface CardHero {
   label: string;
 }
 
+// Gear strip at the foot of a personal card — the player's racket as a product
+// shot, named, with their on-court side. Makes a shared card read like a profile.
+export interface CardGear {
+  racketUrl?: string | null; // Padelful product shot (drawn CORS-safe, falls back to an icon)
+  racketName?: string | null;
+  racketBrand?: string | null;
+  position?: string | null; // "Left" | "Right" | "Both"
+}
+
 export interface CardSpec {
   kicker: string; // small uppercase mono label in the header band
   title: string; // the big header line (player or event name)
   pill?: { text: string; color: string } | null; // status chip, top-right
+  avatar?: AvatarSpec | null; // 8-bit pixel sprite drawn in the header (single-subject cards)
+  photoUrl?: string | null; // a real player photo (Reclub) — drawn over the sprite when it loads
+  gear?: CardGear | null; // racket strip above the footer
   headline?: string; // a sentence under the header
   hero?: CardHero | null;
   rows?: CardRow[];
   footer?: string; // defaults to the site wordmark
+}
+
+// Whether a gear strip has anything worth drawing.
+function hasGear(spec: CardSpec): boolean {
+  return !!spec.gear && !!(spec.gear.racketName || spec.gear.racketUrl);
+}
+
+// The tint a row's left glyph (icon or tag) is drawn in — kept in one place so the
+// pre-render icon preload (collectCardIcons) and the draw pass agree on colour.
+function rowGlyphColor(r: CardRow): string {
+  return r.tagColor ?? (r.accent ? BRAND.green : BRAND.muted);
+}
+
+// Every (icon name, colour) a spec will draw — fed to preloadIcons() before
+// renderCard so the synchronous draw pass can pull decoded images from the cache.
+export function collectCardIcons(spec: CardSpec): { name: string; color: string }[] {
+  const icons = (spec.rows ?? [])
+    .filter((r) => r.icon)
+    .map((r) => ({ name: r.icon as string, color: rowGlyphColor(r) }));
+  // Fallback glyph for the gear strip when the racket photo can't be drawn.
+  if (hasGear(spec)) icons.push({ name: "ping-pong-bat", color: BRAND.green });
+  return icons;
 }
 
 const W = 1080;
@@ -57,6 +97,7 @@ const HEADLINE_H = 60;
 const HERO_H = 150;
 const ROW_H = 64;
 const ROW_H_SUB = 88;
+const GEAR_H = 132;
 const FOOTER_H = 80;
 const DEFAULT_FOOTER = "expose.padel-leaderboard";
 
@@ -71,6 +112,7 @@ function cardHeight(spec: CardSpec): number {
   if (spec.hero) h += HERO_H;
   const rows = spec.rows ?? [];
   h += rows.reduce((sum, r) => sum + rowHeight(r), 0);
+  if (hasGear(spec)) h += GEAR_H;
   h += FOOTER_H;
   return Math.max(h, HEADER_H + 220);
 }
@@ -98,7 +140,43 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
 
   ctx.fillStyle = "#ffffff";
   ctx.font = `700 46px ${FONT_DISPLAY}`;
-  ctx.fillText(trunc(ctx, spec.title, W - PAD * 2 - (spec.pill ? 280 : 0)), PAD, 108);
+  const titleReserve = spec.pill ? 280 : spec.avatar || spec.photoUrl ? 140 : 0;
+  ctx.fillText(trunc(ctx, spec.title, W - PAD * 2 - titleReserve), PAD, 108);
+
+  // Player portrait, top-right — their real Reclub photo when it loaded CORS-clean,
+  // otherwise the 8-bit match-sim sprite. Drawn on a soft disc so it reads against
+  // the dark-green band. Single-subject cards only (Padel Wrapped); multi-player
+  // recaps leave both unset.
+  if (spec.photoUrl || spec.avatar) {
+    const cx = W - PAD - 46;
+    const cy = 82;
+    const R = 52;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fill();
+
+    const photo = getCachedPhoto(spec.photoUrl);
+    if (photo) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, R - 2, 0, Math.PI * 2);
+      ctx.clip();
+      drawCover(ctx, photo, cx - (R - 2), cy - (R - 2), (R - 2) * 2, (R - 2) * 2);
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(cx, cy, R - 1, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.stroke();
+    } else if (spec.avatar) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(3.4, 3.4);
+      drawAvatar(ctx, spec.avatar, 0, 0, 1, 0);
+      ctx.restore();
+    }
+  }
 
   // Status pill, top-right.
   if (spec.pill) {
@@ -140,13 +218,18 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
     const h = rowHeight(r);
     const baseline = y + (r.subtitle ? 34 : 40);
 
-    if (r.tag) {
-      ctx.fillStyle = r.tagColor ?? (r.accent ? BRAND.green : BRAND.muted);
+    // Left gutter: a game-icons glyph when the row has one, else its mono tag.
+    const icon = r.icon ? getCachedIcon(r.icon, rowGlyphColor(r)) : null;
+    if (icon) {
+      const sz = 34;
+      ctx.drawImage(icon, PAD, baseline - 27, sz, sz);
+    } else if (r.tag) {
+      ctx.fillStyle = rowGlyphColor(r);
       ctx.font = `700 20px ${FONT_MONO}`;
       ctx.fillText(r.tag, PAD, baseline);
     }
 
-    const textX = r.tag ? PAD + 72 : PAD;
+    const textX = r.tag || r.icon ? PAD + 72 : PAD;
     const valueText = r.value ?? "";
     ctx.font = `700 30px ${FONT_MONO}`;
     const valueW = valueText ? ctx.measureText(valueText).width + 24 : 0;
@@ -172,12 +255,71 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
     y += h;
   }
 
+  // Gear strip — the player's racket as a product shot, named, with their side.
+  if (hasGear(spec) && spec.gear) {
+    ctx.strokeStyle = "#ececec";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD, y + 6);
+    ctx.lineTo(W - PAD, y + 6);
+    ctx.stroke();
+
+    const tile = 72;
+    const tileX = PAD;
+    const tileY = y + 26;
+    roundRect(ctx, tileX, tileY, tile, tile, 14);
+    ctx.fillStyle = "#f6f5f2";
+    ctx.fill();
+
+    const racket = getCachedPhoto(spec.gear.racketUrl);
+    if (racket) {
+      drawContain(ctx, racket, tileX + 6, tileY + 6, tile - 12, tile - 12);
+    } else {
+      const icon = getCachedIcon("ping-pong-bat", BRAND.green);
+      if (icon) ctx.drawImage(icon, tileX + 18, tileY + 18, tile - 36, tile - 36);
+    }
+
+    const tx = tileX + tile + 22;
+    ctx.fillStyle = BRAND.muted;
+    ctx.font = `600 18px ${FONT_MONO}`;
+    ctx.fillText("GEAR", tx, tileY + 18);
+    ctx.fillStyle = BRAND.ink;
+    ctx.font = `700 30px ${FONT_DISPLAY}`;
+    ctx.fillText(trunc(ctx, spec.gear.racketName ?? "Racket", W - PAD - tx), tx, tileY + 50);
+    const sub = [spec.gear.racketBrand, spec.gear.position ? `Plays ${spec.gear.position}` : null]
+      .filter(Boolean)
+      .join(" · ");
+    if (sub) {
+      ctx.fillStyle = BRAND.muted;
+      ctx.font = `400 20px ${FONT_BODY}`;
+      ctx.fillText(trunc(ctx, sub, W - PAD - tx), tx, tileY + 78);
+    }
+    y += GEAR_H;
+  }
+
   // Footer wordmark.
   ctx.fillStyle = BRAND.muted;
   ctx.font = `500 22px ${FONT_MONO}`;
   ctx.fillText(spec.footer ?? DEFAULT_FOOTER, PAD, canvas.height - 36);
 
   return canvas;
+}
+
+// object-fit: cover — fill the box, cropping overflow (used for the round portrait).
+function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+  const dw = img.naturalWidth * scale;
+  const dh = img.naturalHeight * scale;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
+// object-fit: contain — fit the whole image inside the box (used for racket shots,
+// which are transparent product PNGs that shouldn't be cropped).
+function drawContain(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+  const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+  const dw = img.naturalWidth * scale;
+  const dh = img.naturalHeight * scale;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
 }
 
 export function roundRect(

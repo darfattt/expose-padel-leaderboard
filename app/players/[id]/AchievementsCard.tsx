@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import GameIcon from "@/app/components/GameIcon";
 import type { Achievement } from "@/lib/achievements";
 
 // Career achievement badges, split into what's been earned and what's still
@@ -101,9 +102,14 @@ function Badge({ achievement: a }: { achievement: Achievement }) {
   return (
     <div className={`rounded-md border p-3 ${shell}`}>
       <div className="flex items-center gap-2">
-        <span className={`text-xl ${a.earned ? "" : "grayscale opacity-40"}`} aria-hidden>
-          {a.badge}
-        </span>
+        <GameIcon
+          name={a.icon}
+          fallback={a.badge}
+          size={22}
+          className={
+            !a.earned ? "text-body-muted opacity-40" : a.tone === "bad" ? "text-coral" : "text-deep-green"
+          }
+        />
         <span className={`text-sm font-medium ${nameColor}`}>{a.name}</span>
       </div>
       <p className="text-body-muted text-xs mt-1.5 leading-snug">{a.description}</p>

@@ -131,7 +131,8 @@ function racketKey(r: { slug: string | null; name: string | null }): string | nu
 export interface Achievement {
   key: string;
   name: string;
-  badge: string; // emoji
+  badge: string; // emoji (kept for plain-text share captions)
+  icon: string; // game-icons.net name — the visual badge (see lib/icons)
   description: string;
   earned: boolean;
   tone: "good" | "bad"; // "bad" = a badge of shame, tinted differently
@@ -183,6 +184,98 @@ export interface FieldRacket {
   price?: number | null; // catalogue price, for the Big Spender badge
 }
 
+// Each badge's visual glyph, keyed by achievement key. game-icons.net names (see
+// lib/icons + lib/icons/used.json). Kept as one central table — and attached in a
+// single pass at the end of computeAchievements — so the 70-odd binary()/countBadge()
+// call sites below stay focused on their *logic*, not their iconography. The emoji
+// on each badge stays as the text-caption fallback.
+const BADGE_ICONS: Record<string, string> = {
+  // Volume / loyalty
+  "half-century": "trophy",
+  centurion: "trophy-cup",
+  regular: "calendar",
+  veteran: "ribbon-medal",
+  winner: "sport-medal",
+  champion: "laurel-crown",
+  legend: "diamond-trophy",
+  "point-machine": "coins",
+  "point-tycoon": "money-stack",
+  // Net points & reliability
+  "in-the-black": "weight-scale",
+  "margin-merchant": "chart",
+  certified: "graduate-cap",
+  // Streaks & skill
+  "hot-streak": "fire",
+  "on-fire": "flame-spin",
+  clutch: "snowflake-1",
+  sharpshooter: "bullseye",
+  "clean-sheet": "gloves",
+  unbeaten: "shield",
+  "high-roller": "podium-winner",
+  "mr-reliable": "clockwork",
+  // Rank & rating
+  podium: "podium",
+  apex: "rank-1",
+  "level-up": "upgrade",
+  "on-the-up": "progression",
+  "big-mover": "rocket",
+  // Skill vs the field
+  "giant-killer": "broadsword",
+  david: "slingshot",
+  revenge: "return-arrow",
+  // Social / partnerships
+  "social-butterfly": "butterfly",
+  "dynamic-duo": "linked-rings",
+  globetrotter: "globe",
+  domination: "imp",
+  // Events, venues & cadence
+  "event-champion": "laurels-trophy",
+  "home-turf": "house",
+  "road-warrior": "treasure-map",
+  "iron-week": "heavy-timer",
+  "weekly-habit": "calendar-half-year",
+  // Clubs
+  "club-hopper": "camping-tent",
+  "free-agent": "swap-bag",
+  "club-loyalist": "house-keys",
+  // Gear & setup
+  "geared-up": "backpack",
+  "take-your-side": "compass",
+  "switch-hitter": "switch-weapon",
+  "fully-kitted": "team-upgrade",
+  "simulation-ready": "gamepad",
+  // Gear vs the field
+  "one-of-a-kind": "unicorn",
+  "crowd-favourite": "meeple-group",
+  "power-frame": "muscle-up",
+  "control-frame": "feather",
+  "made-for-you": "mirror-mirror",
+  "big-spender": "take-my-money",
+  // Story
+  marathoner: "running-shoe",
+  "comeback-kid": "recycle",
+  // Named easter-eggs
+  "nemesis-slayer": "crossed-swords",
+  "econ-beater": "podium-winner",
+  "local-legend": "position-marker",
+  // Badges of shame
+  "off-day": "frozen-body",
+  donut: "donut",
+  "blown-out": "explosion-rays",
+  heartbreaker: "broken-heart",
+  "cold-streak": "frozen-orb",
+  "wooden-spoon": "spoon",
+  bridesmaid: "podium-second",
+  sieve: "droplets",
+  "glass-cannon": "cannon-ball",
+  "jekyll-and-hyde": "drama-masks",
+  "punching-bag": "punching-bag",
+  "stuck-together": "breaking-chain",
+  "free-fall": "fall-down",
+  slipping: "parachute",
+  "flat-track-bully": "card-joker",
+};
+
 function countBadge(
   key: string,
   badge: string,
@@ -196,6 +289,7 @@ function countBadge(
     key,
     name,
     badge,
+    icon: BADGE_ICONS[key] ?? "",
     description,
     earned: current >= target,
     tone,
@@ -602,7 +696,7 @@ export function computeAchievements(
     description: string,
     earned: boolean,
     tone: "good" | "bad" = "good"
-  ): Achievement => ({ key, name, badge, description, earned, tone });
+  ): Achievement => ({ key, name, badge, icon: BADGE_ICONS[key] ?? "", description, earned, tone });
 
   const list: Achievement[] = [
     // --- Volume / loyalty ---------------------------------------------------

@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/build-icons.mjs",
     "dev": "next dev",
+    "build:icons": "node scripts/build-icons.mjs",
+    "prebuild": "node scripts/build-icons.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -21,6 +24,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@iconify-json/game-icons": "^1.2.4",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

@@ -11,7 +11,8 @@
 export interface Level {
   key: string;
   category: string; // Playtomic-style category name
-  badge: string; // emoji badge
+  badge: string; // emoji badge (kept for plain-text share captions)
+  icon: string; // game-icons.net name — the visual badge (see lib/icons)
   min: number; // inclusive lower bound on the 0–7 rating
   max: number; // upper bound (inclusive only on the top band)
   description: string;
@@ -28,6 +29,7 @@ export const LEVELS: Level[] = [
     key: "newcomer",
     category: "Newcomer",
     badge: "🌱",
+    icon: "seedling",
     min: 0,
     max: 0.5,
     description: "Brand new — has never picked up a padel racket.",
@@ -37,6 +39,7 @@ export const LEVELS: Level[] = [
     key: "starter",
     category: "Starter",
     badge: "🐣",
+    icon: "high-grass",
     min: 0.5,
     max: 1,
     description: "Under six months in; no real technique or tactics yet.",
@@ -46,6 +49,7 @@ export const LEVELS: Level[] = [
     key: "rookie",
     category: "Rookie",
     badge: "🎾",
+    icon: "tennis-ball",
     min: 1,
     max: 1.5,
     description: "Around a year in; still building the very basics.",
@@ -55,6 +59,7 @@ export const LEVELS: Level[] = [
     key: "rallyer",
     category: "Rallyer",
     badge: "🏓",
+    icon: "ping-pong-bat",
     min: 1.5,
     max: 2,
     description: "Can rally and return, but only at a gentle pace.",
@@ -64,6 +69,7 @@ export const LEVELS: Level[] = [
     key: "improver",
     category: "Improver",
     badge: "🔰",
+    icon: "upgrade",
     min: 2,
     max: 2.5,
     description: "A season of play; steady low-speed exchanges.",
@@ -73,6 +79,7 @@ export const LEVELS: Level[] = [
     key: "shotmaker",
     category: "Shotmaker",
     badge: "🔹",
+    icon: "on-target",
     min: 2.5,
     max: 3,
     description: "Most strokes under control at a normal pace.",
@@ -82,6 +89,7 @@ export const LEVELS: Level[] = [
     key: "driver",
     category: "Driver",
     badge: "🟦",
+    icon: "convergence-target",
     min: 3,
     max: 3.5,
     description: "Drives the ball flat, but with many unforced errors.",
@@ -91,6 +99,7 @@ export const LEVELS: Level[] = [
     key: "director",
     category: "Director",
     badge: "🎯",
+    icon: "target-arrows",
     min: 3.5,
     max: 4,
     description: "Slice and flat shots, directing the ball — still error-prone.",
@@ -100,6 +109,7 @@ export const LEVELS: Level[] = [
     key: "controller",
     category: "Controller",
     badge: "🔶",
+    icon: "bullseye",
     min: 4,
     max: 4.5,
     description: "Controls direction and depth with few unforced errors.",
@@ -109,6 +119,7 @@ export const LEVELS: Level[] = [
     key: "tactician",
     category: "Tactician",
     badge: "🧠",
+    icon: "brain",
     min: 4.5,
     max: 5,
     description: "Puts the ball deep, but still struggles to finish points.",
@@ -118,6 +129,7 @@ export const LEVELS: Level[] = [
     key: "competitor",
     category: "Competitor",
     badge: "🏅",
+    icon: "sport-medal",
     min: 5,
     max: 5.5,
     description: "Solid technique and tactics; ready for good-pace matches.",
@@ -127,6 +139,7 @@ export const LEVELS: Level[] = [
     key: "contender",
     category: "Contender",
     badge: "⚔️",
+    icon: "crossed-swords",
     min: 5.5,
     max: 6,
     description: "Commands pace and tactics in high-tempo matches.",
@@ -136,6 +149,7 @@ export const LEVELS: Level[] = [
     key: "elite",
     category: "Elite",
     badge: "💎",
+    icon: "cut-diamond",
     min: 6,
     max: 6.5,
     description: "Powerful and controlled; reads and dismantles the game.",
@@ -145,6 +159,7 @@ export const LEVELS: Level[] = [
     key: "professional",
     category: "Professional",
     badge: "👑",
+    icon: "crown",
     min: 6.5,
     max: 7,
     description: "Top-tier, WPT-level command of every shot.",

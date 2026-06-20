@@ -1,4 +1,6 @@
-import { type CardSpec, renderCard } from "./card";
+import { preloadIcons } from "@/lib/icons/canvas";
+import { collectCardIcons, type CardSpec, renderCard } from "./card";
+import { preloadPhotos } from "./photo";
 
 // Generic "share this card" plumbing, lifted from the tournament run card so all
 // features share one path: render the spec to a PNG and hand it to the Web Share
@@ -15,6 +17,14 @@ export interface ShareCardOptions {
 }
 
 export async function shareCard(spec: CardSpec, opts: ShareCardOptions): Promise<ShareOutcome> {
+  // Decode every game-icons glyph and remote photo (player portrait, racket shot)
+  // the card draws before the (synchronous) render, so they're cached when
+  // renderCard pulls them. Photos load CORS-clean or resolve null (→ sprite/icon
+  // fallback), so this never blocks the export.
+  await Promise.all([
+    preloadIcons(collectCardIcons(spec)),
+    preloadPhotos([spec.photoUrl, spec.gear?.racketUrl]),
+  ]);
   const canvas = renderCard(spec);
   const { text, title, filename } = opts;
 

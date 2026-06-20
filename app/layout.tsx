@@ -54,6 +54,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span>Parsed from Reclub scoresheets. Stats are computed automatically.</span>
             <span className="font-mono uppercase tracking-mono-label text-xs">expose.padelleaderboard</span>
           </div>
+          <div className="max-w-6xl mx-auto mt-2 text-xs text-muted">
+            Badge, level &amp; award icons by{" "}
+            <a href="https://game-icons.net" className="underline hover:text-ink" rel="noreferrer">
+              game-icons.net
+            </a>{" "}
+            (CC BY 3.0).
+          </div>
         </footer>
       </body>
     </html>

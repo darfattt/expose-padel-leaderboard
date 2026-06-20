@@ -7,6 +7,7 @@ import { fetchRawResults, getLeaderboard, getRatingField } from "@/lib/leaderboa
 import { levelForRating } from "@/lib/levels";
 import { getPlayer, getPlayerGear, getPlayerMatchHistory, getPlayerRackets, getPlayerReclub } from "@/lib/queries";
 import { buildRatingHistory } from "@/lib/rating-history";
+import { proCandidates, proPhoto } from "@/lib/pros";
 import { avatarFor } from "@/lib/reclub-avatar";
 import { racketPlayStyle } from "@/lib/racket-reco";
 import { nextReliabilityGate, reliabilityCap } from "@/lib/rating";
@@ -25,6 +26,7 @@ import GossipCardSkeleton from "./GossipCardSkeleton";
 import { GossipLine } from "./relationship-ui";
 import PartnerChemistryCard from "./PartnerChemistryCard";
 import PpgSparkline from "./PpgSparkline";
+import ProTwin from "./ProTwin";
 import RacketRecoAsync, { RacketRecoSkeleton } from "./RacketReco";
 import RatingHistoryChart from "./RatingHistoryChart";
 import ReportCardAsync from "./ReportCardAsync";
@@ -87,6 +89,10 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   const r = player.row;
   const a = player.attributes;
   const level = levelForRating(player.rating);
+  // The player's "pro twin": rank-matched FIP pro for their rating, rotated by
+  // archetype — the same pick the Padel Wrapped recap crowns.
+  const proTwin = proCandidates(player.rating, player.archetype.primary, gear.gender).pros[0] ?? null;
+  const proTwinPhoto = proTwin ? proPhoto(proTwin) ?? null : null;
   const ratingHistory = buildRatingHistory(matches, ratingField, { id: r.player_id, name: r.name });
   const ppg = ppgTrend(matches);
   const fieldBins = ratingHistogram(board.filter((p) => p.row.games > 0).map((p) => p.rating));
@@ -166,7 +172,8 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
 
-      <div className="mb-8">
+      <div className="mb-8 flex flex-wrap items-center gap-x-6 gap-y-4">
+        {proTwin ? <ProTwin name={proTwin} photo={proTwinPhoto} /> : null}
         <Link href={`/wrapped/${id}`} className="btn-primary text-sm">
           🎬 View {r.name}&apos;s Padel Wrapped
         </Link>

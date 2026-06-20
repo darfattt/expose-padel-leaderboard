@@ -99,7 +99,8 @@ export function buildPowerRankingsCard(pr: PowerRankings, input: PowerCardInput)
 
   pr.leaders.forEach((m, i) => {
     rows.push({
-      tag: i === 0 ? "👑" : `#${m.rank}`,
+      tag: i === 0 ? undefined : `#${m.rank}`,
+      icon: i === 0 ? "laurel-crown" : undefined,
       title: m.name,
       subtitle: `rating ${m.rating.toFixed(1)} · ${m.record}`,
       value: `#${m.rank}`,

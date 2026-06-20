@@ -1,4 +1,5 @@
 import Link from "next/link";
+import GameIcon from "@/app/components/GameIcon";
 import type { AwardWinner, EventAwards as EventAwardsData } from "@/lib/awards";
 import { RECAP_AWARDS, type RecapQuips } from "@/lib/recap";
 
@@ -25,6 +26,7 @@ export default function EventAwards({
           <AwardCard
             key={a.key}
             badge={a.badge}
+            icon={a.icon}
             title={a.label}
             winner={awards[a.key]!}
             quip={quips[a.key]}
@@ -37,11 +39,13 @@ export default function EventAwards({
 
 function AwardCard({
   badge,
+  icon,
   title,
   winner,
   quip,
 }: {
   badge: string;
+  icon: string;
   title: string;
   winner: AwardWinner;
   quip?: string;
@@ -49,9 +53,7 @@ function AwardCard({
   return (
     <div className="card p-4">
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-xl" aria-hidden>
-          {badge}
-        </span>
+        <GameIcon name={icon} fallback={badge} size={22} className="text-deep-green" />
         <span className="mono-label">{title}</span>
       </div>
       <p className="font-display text-lg leading-tight tracking-tight">

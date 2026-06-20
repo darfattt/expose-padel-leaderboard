@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import PlayerAvatar from "@/app/components/PlayerAvatar";
+import GameIcon from "@/app/components/GameIcon";
 import { loadLeaderboardPage } from "@/app/actions/leaderboard";
 import { levelForRating } from "@/lib/levels";
 import type { RankedPlayerWithChange } from "@/lib/standings";
@@ -229,7 +230,7 @@ function LevelBadge({ level }: { level: ReturnType<typeof levelForRating> }) {
       style={{ color: level.color, borderColor: `${level.color}55`, backgroundColor: `${level.color}12` }}
       title={`${level.category} — ${level.description}`}
     >
-      <span aria-hidden>{level.badge}</span>
+      <GameIcon name={level.icon} fallback={level.badge} color={level.color} size={14} />
       {level.category}
     </span>
   );
