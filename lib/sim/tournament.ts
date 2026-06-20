@@ -116,24 +116,28 @@ function shuffle<T>(arr: T[], seed: number): T[] {
 // --- pro de-duplication -----------------------------------------------------
 
 // Hand each entrant a *distinct* pro partner. We walk the field in slot order
-// and, for each entrant, take the first of their rating/archetype-appropriate
-// candidates not already claimed — so a clash slides to the "2nd similar pro",
-// the next-best lookalike, rather than a random stranger. If every candidate is
-// taken (a very homogeneous field), we keep their top pick (a rare dup beats an
-// ill-matched pro).
+// and, for each entrant, prefer their *natural* pro twin — the exact top pick
+// their player page shows (proCandidates' default rating/archetype window) — so
+// an unclashed entrant gets the very same lookalike as their profile. Crucially
+// "you" are seeded first (slot 0), so you never clash and always pair with the
+// pro your own page crowns. Only on a real clash does a later entrant slide to
+// the next rating/archetype-appropriate candidate (a wider band, so even a field
+// bunched at one rating still yields eight distinct lookalikes). If every
+// candidate is taken, we keep the natural pick (a rare dup beats an ill-matched pro).
 export function assignPros(
   entries: TournamentEntry[]
 ): Map<string, { name: string; rank: number }> {
   const taken = new Set<string>();
   const out = new Map<string, { name: string; rank: number }>();
   for (const e of entries) {
-    // Ask for a wide candidate band (≥ the field size) so even a field bunched at
-    // one rating can still be handed eight distinct, rank-appropriate lookalikes.
-    const cands = proCandidates(e.rating, e.archetypePrimary, e.gender, FIELD_SIZE + 4);
-    const free = cands.pros.find((p) => !taken.has(p));
-    const name = free ?? cands.pros[0] ?? "Unknown Pro";
+    // The entrant's natural pro twin (default window) — matches the player page.
+    const natural = proCandidates(e.rating, e.archetypePrimary, e.gender).pros[0];
+    // A wider rank-appropriate band (≥ the field size) to slide into on a clash.
+    const wide = proCandidates(e.rating, e.archetypePrimary, e.gender, FIELD_SIZE + 4).pros;
+    const ordered = natural ? [natural, ...wide.filter((p) => p !== natural)] : wide;
+    const name = ordered.find((p) => !taken.has(p)) ?? natural ?? wide[0] ?? "Unknown Pro";
     taken.add(name);
-    const rank = proRank(name) ?? cands.rankLow ?? 90;
+    const rank = proRank(name) ?? 90;
     out.set(e.id, { name, rank });
   }
   return out;

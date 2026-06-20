@@ -2,6 +2,7 @@ import { proxiedImage } from "@/lib/img-proxy";
 import { proAvatarColor, proInitials, proPhoto } from "@/lib/pros";
 import { BRAND, type CardCourt, type CardSpec } from "@/lib/share/card";
 import type { AvatarSpec } from "@/lib/sim/avatar";
+import type { MatchScript } from "@/lib/sim/engine";
 import type { Skill } from "@/lib/sim/skills";
 import { type PlayedMatch, ROUND_LABEL, type RoundName, type Tournament } from "@/lib/sim/tournament";
 
@@ -41,6 +42,72 @@ export interface RunSummary {
   proColor?: string;
   skills?: Skill[]; // your team's signature moves in play this run
   scene?: CardCourt | null; // the post-match court still of your latest result
+  highlights?: Highlight[]; // play-by-play beats from your latest game (fills the card)
+}
+
+// One beat in the share card's play-by-play reel: a short line of commentary with
+// the running score it left behind. Distilled from the same deterministic game
+// script the live arena narrates, so the card recap and the tape never disagree.
+export interface Highlight {
+  text: string;
+  score: string;
+}
+
+// First name only — keeps the play-by-play lines short enough for a card row.
+function shortName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}
+
+// Distil a rendered game into a short, chronological highlight reel — the beats
+// worth retelling (signature flashes, clinch points, momentum surges, the
+// match-winner) with the score each left. You are always team A, so an "A" winner
+// is you. This is what fills the lower third of the share card instead of blank
+// space, reading like a recap of the game shown in the court still.
+export function gameHighlights(script: MatchScript): Highlight[] {
+  const pts = script.points;
+  if (!pts.length) return [];
+  const you = shortName(script.teamA.playerName);
+  const opp = shortName(script.teamB.playerName);
+  const who = (s: "A" | "B") => (s === "A" ? you : opp);
+
+  const reel: Highlight[] = [];
+  let run = 0; // current win streak length for `runTeam`
+  let runTeam: "A" | "B" | null = null;
+
+  pts.forEach((pt, i) => {
+    if (pt.winner === runTeam) run += 1;
+    else {
+      runTeam = pt.winner;
+      run = 1;
+    }
+    const score = `${pt.scoreA}–${pt.scoreB}`;
+    const w = who(pt.winner);
+
+    if (i === pts.length - 1) {
+      // The decider — always kept (see capReel).
+      reel.push({
+        text: pt.winner === "A" ? `${you} convert — game over!` : `${opp} take the decider.`,
+        score,
+      });
+    } else if (pt.skill) {
+      reel.push({ text: `✦ ${pt.skill.skill.name} — ${w} dazzle.`, score });
+    } else if (pt.big) {
+      reel.push({ text: `Clinch point — ${w} hold their nerve.`, score });
+    } else if (run === 4) {
+      reel.push({ text: `${w} reel off four in a row.`, score });
+    } else if (i === 0) {
+      reel.push({ text: `${who(pt.server)} get us underway.`, score });
+    }
+  });
+
+  return capReel(reel, 6);
+}
+
+// Trim the reel to a card-friendly length, always keeping the finale (the last
+// entry) — drop from the middle so the opener and the game-winner both survive.
+function capReel(reel: Highlight[], max: number): Highlight[] {
+  if (reel.length <= max) return reel;
+  return [...reel.slice(0, max - 1), reel[reel.length - 1]];
 }
 
 // Distil the run into the matches whose result the player has actually seen
@@ -111,6 +178,7 @@ export function buildRunSummary(t: Tournament, throughRoundIndex: number): RunSu
     summary.proInitials = proInitials(proName);
     summary.proColor = proAvatarColor(proName);
     summary.skills = youTeam.skills;
+    summary.highlights = gameHighlights(lastScript);
     summary.scene = {
       teamAName: youTeam.playerName,
       teamBName: oppTeam.playerName,
@@ -171,6 +239,18 @@ export function buildRunCard(s: RunSummary): CardSpec {
     valueColor: m.won ? BRAND.green : BRAND.coral,
   }));
 
+  // Play-by-play from your latest game — the dramatic beats with the running
+  // score, recapping the match shown in the court still (and filling the lower
+  // third of the tall Stories card instead of leaving it blank).
+  const commentaryRows: CardSpec["rows"] = (s.highlights ?? []).map((h, i) => ({
+    heading: i === 0 ? "💬 How it unfolded" : undefined,
+    tag: "▸",
+    title: h.text,
+    value: h.score,
+    tagColor: BRAND.muted,
+    valueColor: BRAND.muted,
+  }));
+
   // The signature moves your team brought to the bracket — gear, pro and kudos
   // skills, each with the one-line note shown in the live commentary legend.
   const skillRows: CardSpec["rows"] = (s.skills ?? []).map((sk, i) => ({
@@ -195,7 +275,7 @@ export function buildRunCard(s: RunSummary): CardSpec {
       : null,
     headline: s.headline,
     court: s.scene ?? null,
-    rows: [...matchRows, ...skillRows],
+    rows: [...matchRows, ...commentaryRows, ...skillRows],
     // Instagram Stories format: 1080 wide × a 1920 floor → a 9:16 portrait, body
     // pinned to the top.
     minHeight: 1920,
