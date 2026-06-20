@@ -1,4 +1,6 @@
+import type { PlayerCardMedia } from "./queries";
 import { BRAND, type CardSpec } from "./share/card";
+import { avatarFromName } from "./sim/avatar";
 import type { RankedPlayerWithChange } from "./standings";
 
 // Distils a ranked board (with movement vs the previous standings) into a "Power
@@ -94,48 +96,75 @@ export interface PowerCardInput {
   headline?: string | null; // optional LLM headline
 }
 
-export function buildPowerRankingsCard(pr: PowerRankings, input: PowerCardInput): CardSpec {
+export function buildPowerRankingsCard(
+  pr: PowerRankings,
+  input: PowerCardInput,
+  media?: Map<string, PlayerCardMedia>
+): CardSpec {
   const rows: CardSpec["rows"] = [];
 
+  // The player's face (Reclub photo over the sprite) + racket, drawn in the row
+  // gutter and by the rank — see lib/share/card.ts. The sprite is always built so
+  // a player with no photo still gets a face.
+  const face = (m: Mover) => {
+    const md = media?.get(m.id);
+    return {
+      avatar: avatarFromName(m.name, undefined, md?.gender ?? null),
+      photoUrl: md?.photoUrl ?? null,
+      racketUrl: md?.racketImage ?? null,
+    };
+  };
+
+  // The card mirrors the on-page sections, each group led by its category heading.
   pr.leaders.forEach((m, i) => {
     rows.push({
-      tag: i === 0 ? undefined : `#${m.rank}`,
-      icon: i === 0 ? "laurel-crown" : undefined,
+      ...face(m),
+      heading: i === 0 ? "👑 Top of the table" : undefined,
       title: m.name,
       subtitle: `rating ${m.rating.toFixed(1)} · ${m.record}`,
       value: `#${m.rank}`,
       accent: i === 0,
     });
   });
-  for (const m of pr.climbers) {
+  pr.climbers.forEach((m, i) => {
     rows.push({
-      tag: `▲${m.delta}`,
-      tagColor: BRAND.green,
+      ...face(m),
+      heading: i === 0 ? "▲ Biggest climbers" : undefined,
       title: m.name,
-      subtitle: `up to #${m.rank}`,
+      subtitle: `up ${m.delta} · now #${m.rank}`,
       value: `#${m.rank}`,
       accent: true,
     });
-  }
-  for (const m of pr.fallers) {
+  });
+  pr.fallers.forEach((m, i) => {
     rows.push({
-      tag: `▼${Math.abs(m.delta as number)}`,
-      tagColor: BRAND.coral,
+      ...face(m),
+      heading: i === 0 ? "▼ Biggest fallers" : undefined,
       title: m.name,
-      subtitle: `down to #${m.rank}`,
+      subtitle: `down ${Math.abs(m.delta as number)} · now #${m.rank}`,
       value: `#${m.rank}`,
       valueColor: BRAND.coral,
     });
-  }
-  for (const m of pr.newcomers) {
-    rows.push({ tag: "✦", title: m.name, subtitle: "newly ranked", value: `#${m.rank}` });
-  }
+  });
+  pr.newcomers.forEach((m, i) => {
+    rows.push({
+      ...face(m),
+      heading: i === 0 ? "✦ Newly ranked" : undefined,
+      title: m.name,
+      subtitle: `rating ${m.rating.toFixed(1)} · ${m.record}`,
+      value: `#${m.rank}`,
+    });
+  });
 
   return {
     kicker: "Power Rankings",
     title: input.scopeLabel,
     headline: input.headline || "Movement since the last Match Night",
     rows,
+    // Instagram Stories format: 1080 wide × a 1920 floor → a 9:16 portrait, with
+    // the body pinned to the top rather than centered in the slack.
+    minHeight: 1920,
+    bodyAlign: "top",
   };
 }
 

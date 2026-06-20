@@ -1,5 +1,5 @@
 import { preloadIcons } from "@/lib/icons/canvas";
-import { collectCardIcons, type CardSpec, renderCard } from "./card";
+import { collectCardIcons, collectCardPhotos, type CardSpec, renderCard } from "./card";
 import { preloadPhotos } from "./photo";
 
 // Generic "share this card" plumbing, lifted from the tournament run card so all
@@ -23,7 +23,7 @@ export async function shareCard(spec: CardSpec, opts: ShareCardOptions): Promise
   // fallback), so this never blocks the export.
   await Promise.all([
     preloadIcons(collectCardIcons(spec)),
-    preloadPhotos([spec.photoUrl, spec.gear?.racketUrl]),
+    preloadPhotos(collectCardPhotos(spec)),
   ]);
   const canvas = renderCard(spec);
   const { text, title, filename } = opts;

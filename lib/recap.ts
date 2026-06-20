@@ -1,5 +1,7 @@
 import type { AwardWinner, EventAwards } from "./awards";
+import type { PlayerCardMedia } from "./queries";
 import { BRAND, type CardSpec } from "./share/card";
+import { avatarFromName } from "./sim/avatar";
 
 // Turns an event's awards into a shareable "Match Night" recap card + caption.
 // Pure data shaping (no DOM / network) so it's unit-testable and usable from both
@@ -42,20 +44,34 @@ export function buildEventRecap(
   event: RecapEvent,
   awards: EventAwards,
   quips: RecapQuips = {},
-  headline?: string | null
+  headline?: string | null,
+  media?: Map<string, PlayerCardMedia>
 ): CardSpec {
   const present = presentAwards(awards);
   return {
     kicker: "Match Night",
     title: event.title,
     headline: headline || metaLine(event) || "The night in awards",
-    rows: present.map((a) => ({
-      icon: a.icon,
-      title: `${a.label} · ${a.winner.names.join(" & ")}`,
-      subtitle: quips[a.key] || a.winner.detail,
-      accent: a.key !== "heartbreak", // only the wooden-spoon award reads as a knock
-      tagColor: a.key === "heartbreak" ? BRAND.coral : BRAND.green,
-    })),
+    rows: present.map((a) => {
+      // The recipient's face + racket fill the row gutter (the first-named player
+      // of a duo). The 8-bit sprite is always built so a player with no photo
+      // still gets a face.
+      const pid = a.winner.playerIds[0];
+      const md = pid ? media?.get(pid) : undefined;
+      return {
+        avatar: avatarFromName(a.winner.names[0] ?? "?", undefined, md?.gender ?? null),
+        photoUrl: md?.photoUrl ?? null,
+        racketUrl: md?.racketImage ?? null,
+        title: `${a.label} · ${a.winner.names.join(" & ")}`,
+        subtitle: quips[a.key] || a.winner.detail,
+        accent: a.key !== "heartbreak", // only the wooden-spoon award reads as a knock
+        tagColor: a.key === "heartbreak" ? BRAND.coral : BRAND.green,
+      };
+    }),
+    // Instagram Stories format: 1080 wide × a 1920 floor → a 9:16 portrait, with
+    // the body pinned to the top rather than centered in the slack.
+    minHeight: 1920,
+    bodyAlign: "top",
   };
 }
 

@@ -1,8 +1,9 @@
-import { computeAchievements } from "./achievements";
+import { computeAchievements, type Achievement } from "./achievements";
 import type { Attributes } from "./archetype";
 import type { RankedPlayer } from "./leaderboard";
 import { levelForRating } from "./levels";
-import { proCandidates } from "./pros";
+import { proxiedImage } from "./img-proxy";
+import { proAvatarColor, proCandidates, proInitials, proPhoto } from "./pros";
 import type { MatchHistoryEntry } from "./queries";
 import { computeForm, partnerChemistry, rivalries } from "./relationships";
 import { BRAND, type CardSpec } from "./share/card";
@@ -76,10 +77,13 @@ export function buildWrapped(input: WrappedInput): WrappedData {
   const pros = proCandidates(player.rating, player.archetype.primary, gender);
   const proTwin = pros.pros[0] ?? null;
 
-  // A signature good badge to crown the recap (field-relative ones simply don't
-  // appear without context, same as elsewhere).
-  const badges = computeAchievements(careerRow, matches);
-  const goodBadge = badges.find((b) => b.earned && b.tone === "good") ?? null;
+  // Earned "good" badges crown the recap: the first is the signature panel in the
+  // carousel; the rest fill the share card's achievements block (field-relative
+  // ones simply don't appear without context, same as elsewhere).
+  const goodBadges = computeAchievements(careerRow, matches).filter(
+    (b) => b.earned && b.tone === "good"
+  );
+  const goodBadge = goodBadges[0] ?? null;
 
   const panels: WrappedPanel[] = [];
 
@@ -183,10 +187,23 @@ export function buildWrapped(input: WrappedInput): WrappedData {
     });
   }
 
-  const card = buildWrappedCard(name, periodLabel, level.category, player.rating, panels, gender, intro?.headline);
+  const card = buildWrappedCard(name, periodLabel, level.category, player.rating, panels, goodBadges, gender, intro?.headline);
   // A real photo (drawn over the sprite when it loads) and the player's gear strip
   // make the shared card feel like a personal profile card.
   card.photoUrl = input.photoUrl ?? null;
+  // Pair the player's portrait with their pro twin's, side by side in the header.
+  // The headshot is proxied so it draws onto the canvas CORS-clean (padelfip.com
+  // sends no CORS header); without it the card falls back to the pro's initials.
+  if (proTwin) {
+    card.proPortrait = {
+      photoUrl: proxiedImage(proPhoto(proTwin)),
+      initials: proInitials(proTwin),
+      color: proAvatarColor(proTwin),
+    };
+  }
+  // Instagram Stories dimensions: the card is 1080 wide, so a 1920 floor makes a
+  // 9:16 portrait. Shorter content is centered between header and footer.
+  card.minHeight = 1920;
   if (input.racket && (input.racket.name || input.racket.image)) {
     card.gear = {
       racketUrl: input.racket.image,
@@ -207,18 +224,31 @@ function buildWrappedCard(
   levelCategory: string,
   rating: number,
   panels: WrappedPanel[],
+  badges: Achievement[],
   gender: Gender | null,
   headline?: string
 ): CardSpec {
-  const ROW_KEYS = ["record", "style", "partner", "protwin", "badge"];
+  const ROW_KEYS = ["record", "style", "partner", "nemesis", "streak", "protwin"];
   const rows = panels
     .filter((p) => ROW_KEYS.includes(p.key))
     .map((p) => ({
       icon: p.icon,
       title: `${p.label}: ${p.headline}`,
       subtitle: p.detail,
-      tagColor: BRAND.green,
+      tagColor: p.accent ? BRAND.coral : BRAND.green,
     }));
+
+  // Achievements block — earned badges, the season's trophies. Fills the portrait
+  // card and rewards the grind; each draws its game-icons glyph in the gutter.
+  const MAX_BADGES = 6;
+  for (const b of badges.slice(0, MAX_BADGES)) {
+    rows.push({
+      icon: b.icon,
+      title: b.name,
+      subtitle: b.description,
+      tagColor: BRAND.green,
+    });
+  }
 
   return {
     kicker: "Padel Wrapped",

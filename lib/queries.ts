@@ -190,6 +190,52 @@ export async function resolveAvatars(playerIds: string[]): Promise<Record<string
   return Object.fromEntries(entries);
 }
 
+// Per-player media for a share card's rows (Power Rankings, Match Night recap):
+// the resolved Reclub photo (drawn over the sprite when CORS-clean), the racket
+// product shot for the gear thumbnail, and gender for the 8-bit sprite fallback.
+export interface PlayerCardMedia {
+  photoUrl: string | null;
+  racketImage: string | null;
+  gender: Gender | null;
+}
+
+// Fetch card media for a handful of listed players in one batched query, then
+// resolve each Reclub avatar (stored value or live-off-the-profile, cached). A
+// player missing from the DB (or when Supabase isn't configured) is simply absent
+// from the map — the card then draws the sprite and skips the gear thumbnail.
+export async function getPlayersCardMedia(ids: string[]): Promise<Map<string, PlayerCardMedia>> {
+  const out = new Map<string, PlayerCardMedia>();
+  if (ids.length === 0) return out;
+  try {
+    const supabase = createReadClient();
+    const { data, error } = await supabase
+      .from("players")
+      .select("id, gender, racket_image, reclub_url, reclub_avatar_url")
+      .in("id", ids);
+    if (error) throw error;
+    const resolved = await Promise.all(
+      (data ?? []).map(async (row) => {
+        const photoUrl = await avatarFor(
+          (row.reclub_url as string | null) ?? null,
+          (row.reclub_avatar_url as string | null) ?? null
+        );
+        return [
+          row.id as string,
+          {
+            photoUrl,
+            racketImage: (row.racket_image as string | null) ?? null,
+            gender: (row.gender as Gender | null) ?? null,
+          },
+        ] as const;
+      })
+    );
+    for (const [id, media] of resolved) out.set(id, media);
+    return out;
+  } catch {
+    return out;
+  }
+}
+
 // The racket each player has set on their profile, keyed by player id. Players
 // who haven't picked a racket are omitted. Returns an empty map when Supabase
 // isn't configured, so the racket leaderboard renders an empty state.

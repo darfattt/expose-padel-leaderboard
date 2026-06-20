@@ -4,7 +4,12 @@ import { getOrCreateEventRecap } from "@/app/actions/recap";
 import ShareButton from "@/app/components/ShareButton";
 import { computeEventAwards } from "@/lib/awards";
 import { fetchCareerStats, getLeaderboard } from "@/lib/leaderboard";
-import { getEvent, getEventPlayerResults, getEventResults } from "@/lib/queries";
+import {
+  getEvent,
+  getEventPlayerResults,
+  getEventResults,
+  getPlayersCardMedia,
+} from "@/lib/queries";
 import { buildEventRecap, buildRecapCaption } from "@/lib/recap";
 import EventAwards from "./EventAwards";
 
@@ -31,8 +36,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   // LLM one-liners + headline for the recap (cached; null when reports disabled,
   // in which case the card/cards fall back to the deterministic stat lines).
   const recap = await getOrCreateEventRecap(id);
+  // Faces + gear for each award winner on the recap card (one batched fetch).
+  const awardIds = [
+    ...new Set(Object.values(awards).flatMap((w) => w?.playerIds ?? [])),
+  ];
+  const recapMedia = await getPlayersCardMedia(awardIds);
   const recapEvent = { title: event.title, playedOn: event.played_on, location: event.location };
-  const recapSpec = buildEventRecap(recapEvent, awards, recap?.quips, recap?.headline);
+  const recapSpec = buildEventRecap(recapEvent, awards, recap?.quips, recap?.headline, recapMedia);
   const recapCaption = buildRecapCaption(recapEvent, awards, recap?.quips, recap?.headline);
   const hasAwards = recapSpec.rows != null && recapSpec.rows.length > 0;
 

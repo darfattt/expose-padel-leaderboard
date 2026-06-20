@@ -3,6 +3,7 @@ import { getOrCreatePowerColumn } from "@/app/actions/power-rankings";
 import ShareButton from "@/app/components/ShareButton";
 import { getClubs } from "@/lib/clubs";
 import { getLeaderboardView } from "@/lib/leaderboard";
+import { getPlayersCardMedia } from "@/lib/queries";
 import {
   buildPowerCaption,
   buildPowerRankings,
@@ -29,7 +30,12 @@ export default async function PowerRankingsPage({
   const pr = buildPowerRankings(view.board);
   const scopeLabel = activeClub ? activeClub.name : "All clubs";
   const cardInput = { scopeLabel, headline: column?.headline };
-  const spec = buildPowerRankingsCard(pr, cardInput);
+  // Faces + gear for every player on the card (one batched fetch).
+  const moverIds = [
+    ...new Set([...pr.leaders, ...pr.climbers, ...pr.fallers, ...pr.newcomers].map((m) => m.id)),
+  ];
+  const media = await getPlayersCardMedia(moverIds);
+  const spec = buildPowerRankingsCard(pr, cardInput, media);
   const caption = buildPowerCaption(pr, cardInput, column?.column);
 
   const empty = !hasPowerRankings(pr);

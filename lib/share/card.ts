@@ -31,7 +31,15 @@ const FONT_BODY = "Inter, system-ui, sans-serif";
 export interface CardRow {
   tag?: string;
   tagColor?: string;
+  heading?: string; // a section label drawn above this row (groups rows into categories)
   icon?: string; // game-icons.net name; drawn in the left gutter in place of `tag`
+  // A player's face for the left gutter (multi-player cards — Power Rankings,
+  // Match Night recap). The 8-bit sprite is the always-available fallback; the
+  // Reclub photo is drawn over it when it loads CORS-clean. Either one displaces
+  // the tag/icon glyph.
+  avatar?: AvatarSpec | null;
+  photoUrl?: string | null;
+  racketUrl?: string | null; // racket product shot, drawn as a small gear thumbnail by the value
   title: string;
   subtitle?: string;
   value?: string;
@@ -61,16 +69,34 @@ export interface CardSpec {
   pill?: { text: string; color: string } | null; // status chip, top-right
   avatar?: AvatarSpec | null; // 8-bit pixel sprite drawn in the header (single-subject cards)
   photoUrl?: string | null; // a real player photo (Reclub) — drawn over the sprite when it loads
+  // A second portrait drawn beside the player's (to its left) — the "pro twin"
+  // on a Padel Wrapped card, so the two faces read side by side. Photo when it
+  // loads CORS-clean, otherwise a colored initials disc.
+  proPortrait?: { photoUrl?: string | null; initials: string; color: string } | null;
   gear?: CardGear | null; // racket strip above the footer
   headline?: string; // a sentence under the header
   hero?: CardHero | null;
   rows?: CardRow[];
   footer?: string; // defaults to the site wordmark
+  // Minimum canvas height. Cards grow with content; this pins a floor so a card
+  // can be a fixed format — e.g. 1920 with the 1080 width gives a 9:16 Instagram
+  // Stories portrait. On a card taller than its content, the slack is distributed
+  // per `bodyAlign`.
+  minHeight?: number;
+  // How a card shorter than its `minHeight` floor sits in the slack between header
+  // and footer: "center" (default) splits the slack above/below; "top" pins the
+  // body just below the header and lets the slack fall to the footer.
+  bodyAlign?: "top" | "center";
 }
 
 // Whether a gear strip has anything worth drawing.
 function hasGear(spec: CardSpec): boolean {
   return !!spec.gear && !!(spec.gear.racketName || spec.gear.racketUrl);
+}
+
+// Whether a row carries a player face for its gutter.
+function rowHasAvatar(r: CardRow): boolean {
+  return !!(r.avatar || r.photoUrl);
 }
 
 // The tint a row's left glyph (icon or tag) is drawn in — kept in one place so the
@@ -90,6 +116,19 @@ export function collectCardIcons(spec: CardSpec): { name: string; color: string 
   return icons;
 }
 
+// Every remote photo a spec will draw — the header portrait + pro twin + gear
+// strip, plus each row's player face and racket thumbnail — fed to preloadPhotos()
+// before renderCard so the synchronous draw pass can pull decoded images.
+export function collectCardPhotos(spec: CardSpec): (string | null | undefined)[] {
+  const urls: (string | null | undefined)[] = [
+    spec.photoUrl,
+    spec.proPortrait?.photoUrl,
+    spec.gear?.racketUrl,
+  ];
+  for (const r of spec.rows ?? []) urls.push(r.photoUrl, r.racketUrl);
+  return urls;
+}
+
 const W = 1080;
 const PAD = 56;
 const HEADER_H = 150;
@@ -97,24 +136,36 @@ const HEADLINE_H = 60;
 const HERO_H = 150;
 const ROW_H = 64;
 const ROW_H_SUB = 88;
+const SECTION_H = 58; // height a section heading adds above the row it sits on
+const AVATAR_R = 24; // radius of a row's player-face disc (fits within ROW_H)
+const GEAR_THUMB = 46; // side of a row's racket thumbnail tile
 const GEAR_H = 132;
 const FOOTER_H = 80;
 const DEFAULT_FOOTER = "expose.padel-leaderboard";
 
-function rowHeight(r: CardRow): number {
+function rowContentHeight(r: CardRow): number {
   return r.subtitle ? ROW_H_SUB : ROW_H;
 }
 
-// Total canvas height is derived from the spec so cards grow with their content.
-function cardHeight(spec: CardSpec): number {
-  let h = HEADER_H + 28; // header band + breathing room
+function rowHeight(r: CardRow): number {
+  return (r.heading ? SECTION_H : 0) + rowContentHeight(r);
+}
+
+// Height of the flowing body (everything between the header band and the footer).
+function bodyHeight(spec: CardSpec): number {
+  let h = 0;
   if (spec.headline) h += HEADLINE_H;
   if (spec.hero) h += HERO_H;
-  const rows = spec.rows ?? [];
-  h += rows.reduce((sum, r) => sum + rowHeight(r), 0);
+  h += (spec.rows ?? []).reduce((sum, r) => sum + rowHeight(r), 0);
   if (hasGear(spec)) h += GEAR_H;
-  h += FOOTER_H;
-  return Math.max(h, HEADER_H + 220);
+  return h;
+}
+
+// Total canvas height is derived from the spec so cards grow with their content,
+// then floored at spec.minHeight (for fixed formats like a Stories portrait).
+function cardHeight(spec: CardSpec): number {
+  const natural = Math.max(HEADER_H + 28 + bodyHeight(spec) + FOOTER_H, HEADER_H + 220);
+  return Math.max(natural, spec.minHeight ?? 0);
 }
 
 // Render the spec to a fresh off-screen canvas.
@@ -138,43 +189,56 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
   ctx.font = `600 22px ${FONT_MONO}`;
   ctx.fillText(spec.kicker.toUpperCase(), PAD, 56);
 
+  // Portraits, top-right. The player on the far right (their Reclub photo, else
+  // the 8-bit sprite); on Padel Wrapped, their "pro twin" sits to the left so the
+  // two faces read side by side. Reserve enough title width to clear them.
+  const hasPlayer = !!(spec.photoUrl || spec.avatar);
+  const portraitCount = (hasPlayer ? 1 : 0) + (spec.proPortrait ? 1 : 0);
+
   ctx.fillStyle = "#ffffff";
   ctx.font = `700 46px ${FONT_DISPLAY}`;
-  const titleReserve = spec.pill ? 280 : spec.avatar || spec.photoUrl ? 140 : 0;
+  const titleReserve = spec.pill ? 280 : portraitCount > 0 ? 24 + portraitCount * 118 : 0;
   ctx.fillText(trunc(ctx, spec.title, W - PAD * 2 - titleReserve), PAD, 108);
 
-  // Player portrait, top-right — their real Reclub photo when it loaded CORS-clean,
-  // otherwise the 8-bit match-sim sprite. Drawn on a soft disc so it reads against
-  // the dark-green band. Single-subject cards only (Padel Wrapped); multi-player
-  // recaps leave both unset.
-  if (spec.photoUrl || spec.avatar) {
-    const cx = W - PAD - 46;
-    const cy = 82;
+  // Single-subject cards only (Padel Wrapped); multi-player recaps leave both unset.
+  if (portraitCount > 0) {
     const R = 52;
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    ctx.fill();
-
-    const photo = getCachedPhoto(spec.photoUrl);
-    if (photo) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, R - 2, 0, Math.PI * 2);
-      ctx.clip();
-      drawCover(ctx, photo, cx - (R - 2), cy - (R - 2), (R - 2) * 2, (R - 2) * 2);
-      ctx.restore();
-      ctx.beginPath();
-      ctx.arc(cx, cy, R - 1, 0, Math.PI * 2);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(255,255,255,0.55)";
-      ctx.stroke();
-    } else if (spec.avatar) {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.scale(3.4, 3.4);
-      drawAvatar(ctx, spec.avatar, 0, 0, 1, 0);
-      ctx.restore();
+    const cy = 82;
+    let cx = W - PAD - 46;
+    if (hasPlayer) {
+      drawPortraitDisc(ctx, cx, cy, R);
+      const photo = getCachedPhoto(spec.photoUrl);
+      if (photo) {
+        drawDiscPhoto(ctx, photo, cx, cy, R);
+      } else if (spec.avatar) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(3.4, 3.4);
+        drawAvatar(ctx, spec.avatar, 0, 0, 1, 0);
+        ctx.restore();
+      }
+      cx -= R * 2 + 14;
+    }
+    if (spec.proPortrait) {
+      const pro = spec.proPortrait;
+      const photo = getCachedPhoto(pro.photoUrl);
+      if (photo) {
+        drawPortraitDisc(ctx, cx, cy, R);
+        drawDiscPhoto(ctx, photo, cx, cy, R);
+      } else {
+        // No headshot — a colored initials disc, matching the on-page pro avatars.
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        ctx.fillStyle = pro.color;
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `700 ${Math.round(R * 0.72)}px ${FONT_DISPLAY}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(pro.initials, cx, cy + 2);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      }
     }
   }
 
@@ -190,7 +254,12 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
     ctx.fillText(spec.pill.text, px + 22, 82);
   }
 
-  let y = HEADER_H + 28;
+  // Body flows from below the header; on a fixed-format (taller) card the slack
+  // between header and footer is split above/below to center the content, or kept
+  // below it (bodyAlign "top") so the body pins just under the header.
+  const bodyTop = HEADER_H + 28;
+  const slack = Math.max(0, canvas.height - FOOTER_H - bodyTop - bodyHeight(spec));
+  let y = bodyTop + (spec.bodyAlign === "top" ? 0 : slack / 2);
 
   // Headline sentence.
   if (spec.headline) {
@@ -216,32 +285,60 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
   // Rows.
   for (const r of spec.rows ?? []) {
     const h = rowHeight(r);
-    const baseline = y + (r.subtitle ? 34 : 40);
 
-    // Left gutter: a game-icons glyph when the row has one, else its mono tag.
-    const icon = r.icon ? getCachedIcon(r.icon, rowGlyphColor(r)) : null;
-    if (icon) {
-      const sz = 34;
-      ctx.drawImage(icon, PAD, baseline - 27, sz, sz);
-    } else if (r.tag) {
-      ctx.fillStyle = rowGlyphColor(r);
-      ctx.font = `700 20px ${FONT_MONO}`;
-      ctx.fillText(r.tag, PAD, baseline);
+    // Section heading, drawn above the row's content to group rows into categories.
+    if (r.heading) {
+      ctx.fillStyle = BRAND.muted;
+      ctx.font = `600 24px ${FONT_MONO}`;
+      ctx.fillText(trunc(ctx, r.heading.toUpperCase(), W - PAD * 2), PAD, y + 36);
     }
 
-    const textX = r.tag || r.icon ? PAD + 72 : PAD;
+    const top = y + (r.heading ? SECTION_H : 0);
+    const baseline = top + (r.subtitle ? 34 : 40);
+    const rowMid = top + rowContentHeight(r) / 2;
+
+    // Left gutter: the player's face disc when the row carries one, else a
+    // game-icons glyph, else its mono tag.
+    if (rowHasAvatar(r)) {
+      drawRowAvatar(ctx, r, PAD + AVATAR_R, rowMid, AVATAR_R);
+    } else {
+      const icon = r.icon ? getCachedIcon(r.icon, rowGlyphColor(r)) : null;
+      if (icon) {
+        const sz = 34;
+        ctx.drawImage(icon, PAD, baseline - 27, sz, sz);
+      } else if (r.tag) {
+        ctx.fillStyle = rowGlyphColor(r);
+        ctx.font = `700 20px ${FONT_MONO}`;
+        ctx.fillText(r.tag, PAD, baseline);
+      }
+    }
+
+    const textX = rowHasAvatar(r) || r.tag || r.icon ? PAD + 72 : PAD;
     const valueText = r.value ?? "";
     ctx.font = `700 30px ${FONT_MONO}`;
     const valueW = valueText ? ctx.measureText(valueText).width + 24 : 0;
 
+    // Gear thumbnail: the player's racket as a small tile, just left of the value.
+    const racket = getCachedPhoto(r.racketUrl);
+    const gearW = racket ? GEAR_THUMB + 18 : 0;
+    if (racket) {
+      const gx = W - PAD - valueW - GEAR_THUMB;
+      const gy = rowMid - GEAR_THUMB / 2;
+      roundRect(ctx, gx, gy, GEAR_THUMB, GEAR_THUMB, 10);
+      ctx.fillStyle = "#f6f5f2";
+      ctx.fill();
+      drawContain(ctx, racket, gx + 4, gy + 4, GEAR_THUMB - 8, GEAR_THUMB - 8);
+    }
+
+    const rightReserve = valueW + gearW;
     ctx.fillStyle = BRAND.ink;
     ctx.font = `400 26px ${FONT_BODY}`;
-    ctx.fillText(trunc(ctx, r.title, W - PAD - textX - valueW), textX, baseline);
+    ctx.fillText(trunc(ctx, r.title, W - PAD - textX - rightReserve), textX, baseline);
 
     if (r.subtitle) {
       ctx.fillStyle = BRAND.muted;
       ctx.font = `400 20px ${FONT_BODY}`;
-      ctx.fillText(trunc(ctx, r.subtitle, W - PAD - textX - valueW), textX, baseline + 30);
+      ctx.fillText(trunc(ctx, r.subtitle, W - PAD - textX - rightReserve), textX, baseline + 30);
     }
 
     if (valueText) {
@@ -303,6 +400,74 @@ export function renderCard(spec: CardSpec): HTMLCanvasElement {
   ctx.fillText(spec.footer ?? DEFAULT_FOOTER, PAD, canvas.height - 36);
 
   return canvas;
+}
+
+// A player's face as a disc on the light card body — their Reclub photo when it
+// loaded CORS-clean, otherwise the deterministic 8-bit sprite. Used in the gutter
+// of multi-player rows (Power Rankings, Match Night recap).
+function drawRowAvatar(ctx: CanvasRenderingContext2D, r: CardRow, cx: number, cy: number, R: number) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = "#f6f5f2";
+  ctx.fill();
+
+  const photo = getCachedPhoto(r.photoUrl);
+  if (photo) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 1, 0, Math.PI * 2);
+    ctx.clip();
+    drawCover(ctx, photo, cx - (R - 1), cy - (R - 1), (R - 1) * 2, (R - 1) * 2);
+    ctx.restore();
+  } else if (r.avatar) {
+    // Sprite art is centred on (0,0) spanning ~y[-14,14]; scale it to fill the
+    // disc, clipped so legs/shadow stay tidy on the white body.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 1, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.translate(cx, cy);
+    const s = (R * 2) / 30;
+    ctx.scale(s, s);
+    drawAvatar(ctx, r.avatar, 0, 0, 1, 0);
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 0.5, 0, Math.PI * 2);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#e6e4df";
+  ctx.stroke();
+}
+
+// The soft translucent disc a header portrait sits on, so it reads against the
+// dark-green band.
+function drawPortraitDisc(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.10)";
+  ctx.fill();
+}
+
+// A circular, cover-cropped photo clipped to the disc, with a hairline ring.
+function drawDiscPhoto(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  cx: number,
+  cy: number,
+  R: number
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 2, 0, Math.PI * 2);
+  ctx.clip();
+  drawCover(ctx, img, cx - (R - 2), cy - (R - 2), (R - 2) * 2, (R - 2) * 2);
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 1, 0, Math.PI * 2);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.stroke();
 }
 
 // object-fit: cover — fill the box, cropping overflow (used for the round portrait).
