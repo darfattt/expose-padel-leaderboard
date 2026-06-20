@@ -11,7 +11,7 @@ import {
 } from "@/lib/queries";
 import { avatarFor } from "@/lib/reclub-avatar";
 import { computeForm } from "@/lib/relationships";
-import { defaultSeed, FIELD_SIZE, pickOpponentIds, type TournamentEntry } from "@/lib/sim/tournament";
+import { FIELD_SIZE, pickOpponentIds, type TournamentEntry } from "@/lib/sim/tournament";
 import type { PlayerGear } from "@/lib/types";
 import TournamentArena from "./TournamentArena";
 
@@ -49,7 +49,7 @@ export default async function TournamentPage({
           Upload more scoresheets to fill the bracket.
         </p>
       ) : youId ? (
-        <Arena board={board} youId={youId} seed={parseSeed(seedParam, youId)} />
+        <Arena board={board} youId={youId} seed={parseSeed(seedParam)} />
       ) : (
         <p className="text-body-muted mt-10 text-sm">Choose yourself above to draw a bracket.</p>
       )}
@@ -57,9 +57,14 @@ export default async function TournamentPage({
   );
 }
 
-function parseSeed(raw: string | undefined, youId: string): number {
+function parseSeed(raw: string | undefined): number {
   const n = raw != null ? Number.parseInt(raw, 10) : NaN;
-  return Number.isFinite(n) ? n >>> 0 : defaultSeed(youId);
+  if (Number.isFinite(n)) return n >>> 0;
+  // No seed pinned in the URL → draw a *fresh, unpredictable* bracket on every
+  // entry/refresh (a new field order and a new quarter-final opponent each time),
+  // so the draw stays curious instead of replaying the same matchup. A "New draw"
+  // or shared link carries an explicit ?seed=, which still replays identically.
+  return Math.floor(Math.random() * 0xffffffff) >>> 0;
 }
 
 // Single-select GET form — "who are you?". Navigates to /tournament?you=<id>.

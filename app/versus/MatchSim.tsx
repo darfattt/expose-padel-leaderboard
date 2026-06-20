@@ -293,11 +293,13 @@ function nearestOnSide(side: "A" | "B", tx: number, ty: number): number {
   return best;
 }
 
-// Move the idle partner on a side instead of leaving it glued to home: the
-// player not on the ball covers the open court — drops back when their partner
-// charges the net (and pinches in when the partner retreats), and shades laterally
-// to the opposite side of the active player. Classic up-and-back padel cover, and
-// it means the four figures never move in lock-step.
+// Move the idle partner as a *connected unit* with the player on the ball, rather
+// than mirroring them to the opposite corner. The pair slides the same way across
+// the court: the partner follows the active player laterally (holding part of the
+// gap so they trail in a diagonal, never stack up) and shares their up/back shift
+// — stepping in behind when the partner presses the net and dropping with them
+// when they retreat. Each stays anchored to its own front/back lane, so they
+// track together as a real doubles team without ever moving in lock-step.
 function coverPartner(
   side: "A" | "B",
   idx: [number, number],
@@ -310,13 +312,14 @@ function coverPartner(
   const partner = active === idx[0] ? idx[1] : idx[0];
   const b = SIDE_BOUNDS[side];
   const ap = targets[active];
-  const ballY = clamp(seg.y1, 0.18, 0.85);
-  // If the active player is up at the net, the partner holds the back; otherwise
-  // the partner pinches forward — they swap up/back duty.
-  const deep = ap.y < 0.5;
-  const ty = deep ? clamp(ballY * 0.4 + 0.56, 0.5, 0.86) : clamp(ballY * 0.4 + 0.1, 0.18, 0.5);
-  const center = (b[0] + b[1]) / 2;
-  const tx = clamp(center + (center - ap.x) * 0.45, b[0], b[1]);
+  const home = HOME[partner];
+  const ballY = clamp(seg.y1, 0.16, 0.86);
+  // Follow laterally: shade toward the active player, keeping ~half the gap to the
+  // partner's home so the two stay a connected diagonal as they slide together.
+  const tx = clamp(lerp(home.x, ap.x, 0.5), b[0], b[1]);
+  // Share the up/back shift: drift from the partner's own lane toward the ball, so
+  // the pair presses to the net and falls back together instead of splitting.
+  const ty = clamp(lerp(home.y, ballY, 0.4), 0.16, 0.86);
   targets[partner] = { x: tx, y: ty };
 }
 
